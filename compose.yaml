@@ -1,0 +1,21 @@
+services:
+  rtl433:
+    image: hertzg/rtl_433:25.12
+    command:
+      - -d
+      - rtl_tcp:host.docker.internal:1234
+      - -f
+      - 433.92M
+      - -R
+      - "41"
+      - -F
+      - json
+      - -M
+      - time:iso:tz
+      - -M
+      - level
+      - -M
+      - protocol
+      - -C
+      - customary
+    restart: "no"
