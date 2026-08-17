@@ -1,0 +1,47 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run commit-time suite
+        shell: pwsh
+        run: ./scripts/test-ci.ps1
+      - name: Build and smoke-test dashboard container
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose logs --no-color dashboard || true
+            docker compose down --volumes || true
+          }
+          trap cleanup EXIT
+          docker compose up --detach --build dashboard
+          for attempt in {1..15}; do
+            if curl --fail --silent http://127.0.0.1:8080/api/health | grep --quiet '"status":"ok"'; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Dashboard did not become healthy in time" >&2
+          exit 1
