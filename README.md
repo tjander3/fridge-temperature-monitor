@@ -79,12 +79,10 @@ A first successful event should resemble this shape (the values will differ):
 
 The initial capture received CRC-valid packets from both transmitters:
 
-| Sensor ID | Channel | Observed temperature | Battery |
-| --- | --- | ---: | --- |
-| `41880` | `2F` | 71°F | Good |
-| `52572` | `1R` | -11°F | Good |
-
-The sensor roles still need to be labeled explicitly before the collector configuration is finalized.
+| Sensor ID | Channel | Role | Observed temperature | Battery |
+| --- | --- | --- | ---: | --- |
+| `41880` | `2F` | Mini fridge (temporarily on the desk for reception testing) | 71°F | Good |
+| `52572` | `1R` | Basement freezer | -11°F | Good |
 
 ### Success criteria
 
