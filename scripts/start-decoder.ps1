@@ -12,6 +12,11 @@ if (-not $wsl) {
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
+& $wsl.Source -d $WslDistribution -u root -- systemctl start docker
+if ($LASTEXITCODE -ne 0) {
+    throw "Docker could not be started in the WSL distribution '$WslDistribution'."
+}
+
 & $wsl.Source -d $WslDistribution -- docker info *> $null
 if ($LASTEXITCODE -ne 0) {
     throw "Docker is not running in the WSL distribution '$WslDistribution'."

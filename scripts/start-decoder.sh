@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-windows_host_ip="$(getent ahostsv4 host.docker.internal | head -n 1 | cut -d ' ' -f 1)"
+windows_host_ip="$(ip route show default | awk '/default/ {print $3; exit}')"
 if [[ -z "$windows_host_ip" ]]; then
-    echo "Could not resolve the Windows host from WSL." >&2
+    echo "Could not determine the Windows host address from WSL's default route." >&2
     exit 1
 fi
 

@@ -2,7 +2,7 @@
 
 Local refrigerator and freezer temperature monitoring with an RTL-SDR Blog V3 receiver, two AcuRite 00986M wireless sensors, `rtl_433`, and Docker.
 
-This is a standalone project rather than an `rtl_433` fork because protocol 41 in `rtl_433` already supports the AcuRite 00986M. The first milestone is to receive a clean JSON temperature event from each sensor.
+This is a standalone project rather than an `rtl_433` fork because protocol 41 in `rtl_433` already supports the AcuRite 00986M. The first milestone—receiving clean JSON temperature events from both sensors—was completed on August 17, 2026.
 
 ## How the Windows setup works
 
@@ -33,7 +33,7 @@ The included check reports what is installed:
 .\scripts\check-prerequisites.ps1
 ```
 
-If `rtl_tcp.exe` is not on `PATH`, pass its full location to either script with `-RtlTcpPath`.
+The Windows bridge script automatically uses `.tools\rtl-sdr\v1.3.6\x64\rtl_tcp.exe` when it is present. Otherwise, it looks on `PATH` or accepts a full location through `-RtlTcpPath`.
 
 ### 1. Prepare the receiver
 
@@ -62,19 +62,29 @@ Open a second PowerShell window in this repository:
 
 The PowerShell script starts Docker through the `Ubuntu-Docker` WSL distribution and supplies the Windows host address to the container. The container listens at 433.92 MHz and enables only `rtl_433` protocol 41 to keep this smoke test focused.
 
-### 4. Trigger and identify each sensor
+### 4. Identify each sensor
 
 1. Place the first transmitter near the antenna.
-2. Remove and reinstall its batteries to prompt transmissions.
-3. Wait for JSON containing fields such as `model`, `id`, `channel`, `temperature_F`, and `battery_ok`.
-4. Write down its ID and label it fridge or freezer.
-5. Repeat with the second transmitter by itself.
+2. Wait for JSON containing fields such as `model`, `id`, `channel`, `temperature_F`, and `battery_ok`. The sensors normally transmit about every two minutes, so battery cycling is unnecessary.
+3. Write down its ID and label it fridge or freezer.
+4. Repeat with the second transmitter by itself.
 
 A first successful event should resemble this shape (the values will differ):
 
 ```json
 {"model":"Acurite-986","id":1234,"channel":"1F","battery_ok":1,"temperature_F":39.2}
 ```
+
+### Confirmed receiver output
+
+The initial capture received CRC-valid packets from both transmitters:
+
+| Sensor ID | Channel | Observed temperature | Battery |
+| --- | --- | ---: | --- |
+| `41880` | `2F` | 71°F | Good |
+| `52572` | `1R` | -11°F | Good |
+
+The sensor roles still need to be labeled explicitly before the collector configuration is finalized.
 
 ### Success criteria
 
