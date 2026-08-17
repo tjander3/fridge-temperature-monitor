@@ -17,4 +17,6 @@ if [[ "${1:-}" == "--check" ]]; then
 fi
 
 echo "Connecting rtl_433 to rtl_tcp on Windows at ${WINDOWS_HOST_IP}:1234..."
-docker compose up rtl433
+docker compose up -d --build
+docker compose ps
+echo "Dashboard: http://localhost:8080"

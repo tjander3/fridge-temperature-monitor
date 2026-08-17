@@ -1,4 +1,23 @@
 services:
+  dashboard:
+    build:
+      context: ./dashboard
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')"
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   rtl433:
     image: hertzg/rtl_433:25.12
     extra_hosts:
@@ -12,6 +31,8 @@ services:
       - "41"
       - -F
       - json
+      - -F
+      - syslog:dashboard:1514
       - -M
       - time:iso:tz
       - -M
@@ -20,4 +41,7 @@ services:
       - protocol
       - -C
       - customary
-    restart: "no"
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    restart: unless-stopped

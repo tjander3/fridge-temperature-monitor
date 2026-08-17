@@ -1,0 +1,282 @@
+import json
+import os
+import signal
+import socketserver
+import sqlite3
+import threading
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+
+APP_DIR = Path(__file__).resolve().parent
+DATABASE_PATH = Path(os.environ.get("DATABASE_PATH", "/data/fridge-monitor.db"))
+SENSORS_PATH = Path(os.environ.get("SENSORS_PATH", APP_DIR / "sensors.json"))
+HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
+SYSLOG_PORT = int(os.environ.get("SYSLOG_PORT", "1514"))
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
+def iso_utc(value):
+    if not value:
+        return utc_now().isoformat().replace("+00:00", "Z")
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def load_sensors(path=SENSORS_PATH):
+    with path.open(encoding="utf-8") as sensor_file:
+        return json.load(sensor_file)
+
+
+class ReadingStore:
+    def __init__(self, database_path=DATABASE_PATH, sensors=None):
+        self.database_path = Path(database_path)
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.sensors = sensors if sensors is not None else load_sensors()
+        self.lock = threading.Lock()
+        self._initialize()
+
+    def _connect(self):
+        connection = sqlite3.connect(self.database_path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
+    def _initialize(self):
+        with self._connection() as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS readings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    observed_at TEXT NOT NULL,
+                    sensor_id INTEGER NOT NULL,
+                    channel TEXT,
+                    temperature_f REAL NOT NULL,
+                    battery_ok INTEGER,
+                    rssi REAL,
+                    snr REAL,
+                    raw_json TEXT NOT NULL,
+                    UNIQUE(sensor_id, observed_at, temperature_f)
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS readings_time_idx ON readings(observed_at)"
+            )
+
+    def add_event(self, event):
+        if event.get("model") != "Acurite-986":
+            return False
+
+        try:
+            sensor_id = int(event["id"])
+            temperature_f = float(event["temperature_F"])
+            observed_at = iso_utc(event.get("time"))
+        except (KeyError, TypeError, ValueError):
+            return False
+
+        with self.lock, self._connection() as connection:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO readings (
+                    observed_at, sensor_id, channel, temperature_f,
+                    battery_ok, rssi, snr, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    observed_at,
+                    sensor_id,
+                    event.get("channel"),
+                    temperature_f,
+                    event.get("battery_ok"),
+                    event.get("rssi"),
+                    event.get("snr"),
+                    json.dumps(event, separators=(",", ":"), sort_keys=True),
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def dashboard_data(self, hours=24):
+        hours = max(1, min(int(hours), 24 * 365))
+        cutoff = iso_utc(utc_now() - timedelta(hours=hours))
+        with self.lock, self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT observed_at, sensor_id, channel, temperature_f,
+                       battery_ok, rssi, snr
+                FROM readings
+                WHERE observed_at >= ?
+                ORDER BY observed_at
+                """,
+                (cutoff,),
+            ).fetchall()
+
+            latest_rows = connection.execute(
+                """
+                SELECT r.observed_at, r.sensor_id, r.channel, r.temperature_f,
+                       r.battery_ok, r.rssi, r.snr
+                FROM readings r
+                INNER JOIN (
+                    SELECT sensor_id, MAX(observed_at) AS observed_at
+                    FROM readings
+                    GROUP BY sensor_id
+                ) latest
+                ON latest.sensor_id = r.sensor_id
+                AND latest.observed_at = r.observed_at
+                """
+            ).fetchall()
+
+        points_by_sensor = {}
+        for row in rows:
+            points_by_sensor.setdefault(str(row["sensor_id"]), []).append(
+                {"time": row["observed_at"], "temperature_f": row["temperature_f"]}
+            )
+        latest_by_sensor = {str(row["sensor_id"]): dict(row) for row in latest_rows}
+
+        sensors = []
+        known_ids = set(self.sensors) | set(points_by_sensor) | set(latest_by_sensor)
+        for sensor_id in sorted(known_ids):
+            config = self.sensors.get(sensor_id, {})
+            latest = latest_by_sensor.get(sensor_id)
+            sensors.append(
+                {
+                    "id": int(sensor_id),
+                    "name": config.get("name", f"Sensor {sensor_id}"),
+                    "channel": config.get("channel") or (latest or {}).get("channel"),
+                    "monitoring": config.get("monitoring", True),
+                    "minimum_f": config.get("minimum_f"),
+                    "maximum_f": config.get("maximum_f"),
+                    "note": config.get("note"),
+                    "status": self._status(config, latest),
+                    "latest": latest,
+                    "points": points_by_sensor.get(sensor_id, []),
+                }
+            )
+
+        return {
+            "generated_at": iso_utc(utc_now()),
+            "hours": hours,
+            "sensors": sensors,
+        }
+
+    @staticmethod
+    def _status(config, latest):
+        if not config.get("monitoring", True):
+            return "setup"
+        if not latest:
+            return "no_data"
+
+        observed = datetime.fromisoformat(latest["observed_at"].replace("Z", "+00:00"))
+        stale_minutes = int(config.get("stale_minutes", 10))
+        if utc_now() - observed > timedelta(minutes=stale_minutes):
+            return "stale"
+        if latest.get("battery_ok") == 0:
+            return "low_battery"
+
+        temperature = latest["temperature_f"]
+        minimum = config.get("minimum_f")
+        maximum = config.get("maximum_f")
+        if maximum is not None and temperature > maximum:
+            return "too_warm"
+        if minimum is not None and temperature < minimum:
+            return "too_cold"
+        return "ok"
+
+
+class SyslogHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        payload = self.request[0].decode("utf-8", errors="replace")
+        json_start = payload.find("{")
+        if json_start < 0:
+            return
+        try:
+            event = json.loads(payload[json_start:])
+        except json.JSONDecodeError:
+            return
+        self.server.store.add_event(event)
+
+
+class DashboardHandler(SimpleHTTPRequestHandler):
+    store = None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(APP_DIR / "static"), **kwargs)
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/health":
+            self._send_json({"status": "ok"})
+            return
+        if parsed.path == "/api/readings":
+            try:
+                hours = int(parse_qs(parsed.query).get("hours", ["24"])[0])
+            except ValueError:
+                self._send_json({"error": "hours must be an integer"}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(self.store.dashboard_data(hours))
+            return
+        super().do_GET()
+
+    def _send_json(self, value, status=HTTPStatus.OK):
+        body = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, message_format, *args):
+        print(f"http: {message_format % args}", flush=True)
+
+
+def serve():
+    sensors = load_sensors()
+    store = ReadingStore(sensors=sensors)
+    DashboardHandler.store = store
+
+    udp_server = socketserver.ThreadingUDPServer(("0.0.0.0", SYSLOG_PORT), SyslogHandler)
+    udp_server.store = store
+    udp_thread = threading.Thread(target=udp_server.serve_forever, daemon=True)
+    udp_thread.start()
+
+    http_server = ThreadingHTTPServer(("0.0.0.0", HTTP_PORT), DashboardHandler)
+
+    def shutdown(_signum, _frame):
+        threading.Thread(target=http_server.shutdown, daemon=True).start()
+        threading.Thread(target=udp_server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+    print(
+        f"Dashboard listening on :{HTTP_PORT}; rtl_433 syslog on UDP :{SYSLOG_PORT}",
+        flush=True,
+    )
+    try:
+        http_server.serve_forever()
+    finally:
+        udp_server.shutdown()
+        http_server.server_close()
+        udp_server.server_close()
+
+
+if __name__ == "__main__":
+    serve()

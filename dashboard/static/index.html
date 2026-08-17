@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cold Storage Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07121d;
+      --panel: #0d1c29;
+      --panel-2: #112536;
+      --text: #e9f4fb;
+      --muted: #8ea6b8;
+      --line: #244156;
+      --cyan: #37c9d9;
+      --amber: #ffb84d;
+      --green: #52d39a;
+      --red: #ff6b78;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 15% -10%, #173c50 0, transparent 36%), var(--bg);
+      color: var(--text);
+    }
+    main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 52px 0 64px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+    .eyebrow { color: var(--cyan); font-size: 12px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
+    h1 { margin: 7px 0 5px; font-size: clamp(30px, 5vw, 48px); letter-spacing: -.045em; }
+    .subtitle, .updated { color: var(--muted); }
+    .updated { font-size: 13px; white-space: nowrap; }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+    .card, .chart-panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(17,37,54,.96), rgba(10,25,37,.96)); border-radius: 18px; box-shadow: 0 22px 55px rgba(0,0,0,.22); }
+    .card { padding: 22px; min-height: 190px; }
+    .card-top { display: flex; justify-content: space-between; align-items: start; gap: 14px; }
+    .sensor-name { margin: 0; font-size: 19px; }
+    .sensor-meta { margin-top: 4px; color: var(--muted); font-size: 13px; }
+    .temperature { margin: 24px 0 8px; font-size: 48px; font-weight: 750; letter-spacing: -.055em; }
+    .temperature small { font-size: 20px; color: var(--muted); }
+    .status { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 750; background: rgba(142,166,184,.12); color: var(--muted); }
+    .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .status.ok { color: var(--green); background: rgba(82,211,154,.12); }
+    .status.setup { color: var(--amber); background: rgba(255,184,77,.12); }
+    .status.alert { color: var(--red); background: rgba(255,107,120,.12); }
+    .chart-panel { padding: 22px; }
+    .chart-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+    .chart-header h2 { margin: 0; font-size: 19px; }
+    .ranges { display: flex; gap: 6px; flex-wrap: wrap; }
+    button { border: 1px solid var(--line); color: var(--muted); background: transparent; border-radius: 9px; padding: 7px 10px; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+    button:hover, button.active { color: var(--text); border-color: var(--cyan); background: rgba(55,201,217,.1); }
+    #chart { width: 100%; min-height: 360px; display: block; overflow: visible; }
+    .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px; color: var(--muted); font-size: 13px; }
+    .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; background: var(--series-color); }
+    .empty { fill: var(--muted); font-size: 14px; text-anchor: middle; }
+    footer { margin-top: 18px; color: var(--muted); font-size: 12px; text-align: center; }
+    @media (max-width: 700px) {
+      main { width: min(100% - 20px, 1120px); padding-top: 28px; }
+      header { align-items: start; flex-direction: column; }
+      .cards { grid-template-columns: 1fr; }
+      .chart-header { align-items: start; flex-direction: column; }
+      #chart { min-height: 300px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <div class="eyebrow">Home systems</div>
+        <h1>Cold Storage Monitor</h1>
+        <div class="subtitle">Live temperatures from the basement freezer and mini fridge.</div>
+      </div>
+      <div class="updated" id="updated">Waiting for data…</div>
+    </header>
+
+    <section class="cards" id="cards" aria-live="polite"></section>
+
+    <section class="chart-panel">
+      <div class="chart-header">
+        <h2>Temperature history</h2>
+        <div class="ranges" aria-label="Chart range">
+          <button data-hours="6">6 hours</button>
+          <button data-hours="24" class="active">24 hours</button>
+          <button data-hours="168">7 days</button>
+          <button data-hours="720">30 days</button>
+        </div>
+      </div>
+      <svg id="chart" role="img" aria-label="Temperature history chart"></svg>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <footer>Data stays on this computer. Safety limits: fridge ≤ 40°F and freezer ≤ 0°F.</footer>
+  </main>
+
+  <script>
+    const colors = ["#37c9d9", "#ffb84d", "#b58cff", "#52d39a"];
+    const statusText = {
+      ok: "Temperature good",
+      setup: "Setup mode",
+      no_data: "Waiting for data",
+      stale: "Sensor overdue",
+      low_battery: "Low battery",
+      too_warm: "Too warm",
+      too_cold: "Too cold"
+    };
+    let selectedHours = 24;
+
+    function formatSeen(value) {
+      if (!value) return "No readings received";
+      const seconds = Math.max(0, (Date.now() - new Date(value).getTime()) / 1000);
+      if (seconds < 90) return "Seen just now";
+      if (seconds < 3600) return `Seen ${Math.round(seconds / 60)} min ago`;
+      return `Seen ${Math.round(seconds / 3600)} hr ago`;
+    }
+
+    function renderCards(sensors) {
+      const cards = document.getElementById("cards");
+      cards.replaceChildren();
+      sensors.forEach((sensor) => {
+        const card = document.createElement("article");
+        card.className = "card";
+        const top = document.createElement("div");
+        top.className = "card-top";
+        const identity = document.createElement("div");
+        const name = document.createElement("h2");
+        name.className = "sensor-name";
+        name.textContent = sensor.name;
+        const meta = document.createElement("div");
+        meta.className = "sensor-meta";
+        meta.textContent = `ID ${sensor.id} · Channel ${sensor.channel || "unknown"}`;
+        identity.append(name, meta);
+        const status = document.createElement("span");
+        status.className = `status ${sensor.status === "ok" ? "ok" : sensor.status === "setup" ? "setup" : "alert"}`;
+        status.textContent = statusText[sensor.status] || sensor.status;
+        top.append(identity, status);
+        const temperature = document.createElement("div");
+        temperature.className = "temperature";
+        temperature.textContent = sensor.latest ? Number(sensor.latest.temperature_f).toFixed(1) : "—";
+        const unit = document.createElement("small");
+        unit.textContent = " °F";
+        temperature.append(unit);
+        const seen = document.createElement("div");
+        seen.className = "sensor-meta";
+        seen.textContent = sensor.note || formatSeen(sensor.latest?.observed_at);
+        card.append(top, temperature, seen);
+        cards.append(card);
+      });
+    }
+
+    function svgNode(tag, attrs = {}) {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+      return node;
+    }
+
+    function renderChart(sensors) {
+      const svg = document.getElementById("chart");
+      svg.replaceChildren();
+      const width = Math.max(620, svg.clientWidth || 900);
+      const height = 360;
+      const margin = { top: 18, right: 18, bottom: 42, left: 48 };
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      const all = sensors.flatMap((sensor) => sensor.points.map((point) => ({...point, sensor})));
+      if (!all.length) {
+        const empty = svgNode("text", {x: width / 2, y: height / 2, class: "empty"});
+        empty.textContent = "Waiting for the first stored reading";
+        svg.append(empty);
+        return;
+      }
+
+      const xMax = Date.now();
+      const xMin = xMax - selectedHours * 3600000;
+      const temps = all.map((point) => Number(point.temperature_f));
+      let yMin = Math.floor(Math.min(...temps) / 10) * 10 - 5;
+      let yMax = Math.ceil(Math.max(...temps) / 10) * 10 + 5;
+      if (yMax - yMin < 20) { yMin -= 10; yMax += 10; }
+      const plotWidth = width - margin.left - margin.right;
+      const plotHeight = height - margin.top - margin.bottom;
+      const x = (time) => margin.left + ((new Date(time).getTime() - xMin) / (xMax - xMin)) * plotWidth;
+      const y = (temp) => margin.top + (1 - (temp - yMin) / (yMax - yMin)) * plotHeight;
+
+      for (let i = 0; i <= 4; i += 1) {
+        const value = yMin + ((yMax - yMin) * i / 4);
+        const lineY = y(value);
+        svg.append(svgNode("line", {x1: margin.left, x2: width - margin.right, y1: lineY, y2: lineY, stroke: "#244156", "stroke-width": 1}));
+        const label = svgNode("text", {x: margin.left - 9, y: lineY + 4, fill: "#8ea6b8", "font-size": 11, "text-anchor": "end"});
+        label.textContent = `${Math.round(value)}°`;
+        svg.append(label);
+      }
+
+      for (let i = 0; i <= 4; i += 1) {
+        const timestamp = xMin + ((xMax - xMin) * i / 4);
+        const label = svgNode("text", {x: margin.left + plotWidth * i / 4, y: height - 14, fill: "#8ea6b8", "font-size": 11, "text-anchor": i === 0 ? "start" : i === 4 ? "end" : "middle"});
+        label.textContent = new Date(timestamp).toLocaleString([], selectedHours <= 24 ? {hour: "numeric", minute: "2-digit"} : {month: "short", day: "numeric"});
+        svg.append(label);
+      }
+
+      sensors.forEach((sensor, index) => {
+        const visible = sensor.points.filter((point) => new Date(point.time).getTime() >= xMin);
+        if (!visible.length) return;
+        const points = visible.map((point) => `${x(point.time).toFixed(1)},${y(Number(point.temperature_f)).toFixed(1)}`).join(" ");
+        svg.append(svgNode("polyline", {points, fill: "none", stroke: colors[index % colors.length], "stroke-width": 2.5, "stroke-linejoin": "round", "stroke-linecap": "round"}));
+        const latest = visible[visible.length - 1];
+        svg.append(svgNode("circle", {cx: x(latest.time), cy: y(Number(latest.temperature_f)), r: 4, fill: colors[index % colors.length]}));
+      });
+    }
+
+    function renderLegend(sensors) {
+      const legend = document.getElementById("legend");
+      legend.replaceChildren();
+      sensors.forEach((sensor, index) => {
+        const item = document.createElement("span");
+        item.style.setProperty("--series-color", colors[index % colors.length]);
+        item.textContent = sensor.name;
+        legend.append(item);
+      });
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch(`/api/readings?hours=${selectedHours}`, {cache: "no-store"});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        renderCards(data.sensors);
+        renderChart(data.sensors);
+        renderLegend(data.sensors);
+        document.getElementById("updated").textContent = `Updated ${new Date(data.generated_at).toLocaleTimeString([], {hour: "numeric", minute: "2-digit", second: "2-digit"})}`;
+      } catch (error) {
+        document.getElementById("updated").textContent = `Dashboard unavailable: ${error.message}`;
+      }
+    }
+
+    document.querySelectorAll("button[data-hours]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedHours = Number(button.dataset.hours);
+        document.querySelectorAll("button[data-hours]").forEach((item) => item.classList.toggle("active", item === button));
+        refresh();
+      });
+    });
+    window.addEventListener("resize", () => refresh());
+    refresh();
+    setInterval(refresh, 30000);
+  </script>
+</body>
+</html>

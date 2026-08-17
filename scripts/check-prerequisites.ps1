@@ -1,8 +1,18 @@
 [CmdletBinding()]
 param(
-    [string]$RtlTcpPath = "rtl_tcp.exe",
+    [string]$RtlTcpPath,
     [string]$WslDistribution = "Ubuntu-Docker"
 )
+
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$localRtlTcp = Join-Path $repositoryRoot ".tools\rtl-sdr\v1.3.6\x64\rtl_tcp.exe"
+if (-not $RtlTcpPath) {
+    $RtlTcpPath = if (Test-Path -LiteralPath $localRtlTcp) {
+        $localRtlTcp
+    } else {
+        "rtl_tcp.exe"
+    }
+}
 
 $checks = @(
     [pscustomobject]@{
