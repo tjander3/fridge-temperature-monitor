@@ -6,7 +6,7 @@ This is a standalone project rather than an `rtl_433` fork because protocol 41 i
 
 ## How the Windows setup works
 
-Docker Desktop does not pass a USB receiver directly into a normal Linux container. Instead:
+The Docker Engine runs directly inside the `Ubuntu-Docker` WSL2 distribution, without Docker Desktop. WSL does not pass the USB receiver directly into a normal Linux container, so instead:
 
 ```text
 AcuRite sensor -> 433.92 MHz -> RTL-SDR USB -> rtl_tcp on Windows
@@ -21,7 +21,8 @@ AcuRite sensor -> 433.92 MHz -> RTL-SDR USB -> rtl_tcp on Windows
 
 ### Prerequisites
 
-- Docker Desktop using Linux containers
+- WSL2 with the `Ubuntu-Docker` distribution
+- Docker Engine and Docker Compose installed inside `Ubuntu-Docker`
 - An RTL-SDR-compatible Windows USB driver and `rtl_tcp.exe`
 - The RTL-SDR Blog V3 and its antenna
 - At least one AcuRite 00986M transmitter with fresh batteries
@@ -59,7 +60,7 @@ Open a second PowerShell window in this repository:
 .\scripts\start-decoder.ps1
 ```
 
-The script supports both current `docker compose` and older `docker-compose` installations. The container listens at 433.92 MHz and enables only `rtl_433` protocol 41 to keep this smoke test focused.
+The PowerShell script starts Docker through the `Ubuntu-Docker` WSL distribution and supplies the Windows host address to the container. The container listens at 433.92 MHz and enables only `rtl_433` protocol 41 to keep this smoke test focused.
 
 ### 4. Trigger and identify each sensor
 

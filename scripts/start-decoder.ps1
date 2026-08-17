@@ -1,17 +1,21 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$WslDistribution = "Ubuntu-Docker"
+)
 
 $ErrorActionPreference = "Stop"
 
-docker compose version *> $null
-if ($LASTEXITCODE -eq 0) {
-    docker compose up rtl433
-    exit $LASTEXITCODE
+$wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+if (-not $wsl) {
+    throw "WSL was not found. Install WSL2 and the Ubuntu-Docker distribution first."
 }
 
-if (Get-Command docker-compose -ErrorAction SilentlyContinue) {
-    docker-compose up rtl433
-    exit $LASTEXITCODE
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+& $wsl.Source -d $WslDistribution -- docker info *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw "Docker is not running in the WSL distribution '$WslDistribution'."
 }
 
-throw "Docker Compose was not found. Install or update Docker Desktop, then try again."
+& $wsl.Source -d $WslDistribution --cd $repositoryRoot -- bash ./scripts/start-decoder.sh
+exit $LASTEXITCODE

@@ -1,6 +1,8 @@
 services:
   rtl433:
     image: hertzg/rtl_433:25.12
+    extra_hosts:
+      - "host.docker.internal:${WINDOWS_HOST_IP:-host-gateway}"
     command:
       - -d
       - rtl_tcp:host.docker.internal:1234

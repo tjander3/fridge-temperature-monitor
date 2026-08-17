@@ -1,18 +1,19 @@
 [CmdletBinding()]
 param(
-    [string]$RtlTcpPath = "rtl_tcp.exe"
+    [string]$RtlTcpPath = "rtl_tcp.exe",
+    [string]$WslDistribution = "Ubuntu-Docker"
 )
 
 $checks = @(
     [pscustomobject]@{
-        Requirement = "Docker CLI"
-        Found = [bool](Get-Command docker -ErrorAction SilentlyContinue)
-        Detail = "Required to run rtl_433"
+        Requirement = "WSL"
+        Found = [bool](Get-Command wsl.exe -ErrorAction SilentlyContinue)
+        Detail = "Required to host Docker Engine"
     },
     [pscustomobject]@{
-        Requirement = "Docker Compose"
+        Requirement = "WSL Docker Engine"
         Found = $false
-        Detail = "Required to start the decoder"
+        Detail = "Expected in $WslDistribution"
     },
     [pscustomobject]@{
         Requirement = "rtl_tcp"
@@ -22,16 +23,8 @@ $checks = @(
 )
 
 if ($checks[0].Found) {
-    docker compose version *> $null
+    wsl.exe -d $WslDistribution -- docker info *> $null
     $checks[1].Found = ($LASTEXITCODE -eq 0)
-}
-
-if (-not $checks[1].Found -and (Get-Command docker-compose -ErrorAction SilentlyContinue)) {
-    docker-compose version *> $null
-    $checks[1].Found = ($LASTEXITCODE -eq 0)
-    if ($checks[1].Found) {
-        $checks[1].Detail = "Found legacy docker-compose"
-    }
 }
 
 $checks | Format-Table -AutoSize
