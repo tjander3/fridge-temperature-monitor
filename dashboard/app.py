@@ -295,6 +295,7 @@ class ReadingStore:
                     "id": int(sensor_id),
                     "name": config.get("name", f"Sensor {sensor_id}"),
                     "channel": config.get("channel") or (latest or {}).get("channel"),
+                    "color": config.get("color"),
                     "profile": profile,
                     "monitoring": config.get("monitoring", True),
                     "minimum_f": config.get("minimum_f"),

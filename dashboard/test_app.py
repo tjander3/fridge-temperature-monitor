@@ -16,12 +16,14 @@ import app
 SENSORS = {
     "41880": {
         "name": "Mini fridge",
+        "color": "#37c9d9",
         "profile": "unmonitored",
         "monitoring": False,
         "maximum_f": 40,
     },
     "52572": {
         "name": "Basement freezer",
+        "color": "#ffb84d",
         "profile": "freezer",
         "monitoring": True,
         "minimum_f": -20,
@@ -59,6 +61,7 @@ class ReadingStoreTests(unittest.TestCase):
         freezer = next(sensor for sensor in data["sensors"] if sensor["id"] == 52572)
         self.assertEqual(len(freezer["points"]), 1)
         self.assertEqual(freezer["status"], "ok")
+        self.assertEqual(freezer["color"], "#ffb84d")
 
     def test_ignores_unrelated_protocols(self):
         self.assertFalse(self.store.add_event({"model": "Other", "id": 1}))

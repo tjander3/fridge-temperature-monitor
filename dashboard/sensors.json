@@ -7,7 +7,7 @@
     "minimum_f": 34,
     "maximum_f": 45,
     "stale_minutes": 10,
-    "note": "Installed in the mini fridge"
+    "color": "#37c9d9"
   },
   "52572": {
     "name": "Basement freezer",
@@ -16,6 +16,7 @@
     "monitoring": true,
     "minimum_f": -20,
     "maximum_f": 0,
-    "stale_minutes": 10
+    "stale_minutes": 10,
+    "color": "#ffb84d"
   }
 }

@@ -35,9 +35,10 @@
     .updated { font-size: 13px; white-space: nowrap; }
     .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
     .card, .chart-panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(17,37,54,.96), rgba(10,25,37,.96)); border-radius: 18px; box-shadow: 0 22px 55px rgba(0,0,0,.22); }
-    .card { padding: 22px; min-height: 300px; }
+    .card { padding: 22px; min-height: 300px; border-left: 4px solid var(--sensor-color, var(--line)); }
     .card-top { display: flex; justify-content: space-between; align-items: start; gap: 14px; }
-    .sensor-name { margin: 0; font-size: 19px; }
+    .sensor-name { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 19px; }
+    .sensor-name::before { content: ""; flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--sensor-color, var(--muted)); box-shadow: 0 0 14px color-mix(in srgb, var(--sensor-color, var(--muted)) 60%, transparent); }
     .sensor-meta { margin-top: 4px; color: var(--muted); font-size: 13px; }
     .sensor-note { margin-top: 6px; color: var(--muted); font-size: 13px; }
     .temperature { margin: 24px 0 8px; font-size: 48px; font-weight: 750; letter-spacing: -.055em; }
@@ -128,6 +129,12 @@
     };
     let selectedHours = 24;
 
+    function sensorColor(sensor, index) {
+      return /^#[0-9a-f]{6}$/i.test(sensor.color || "")
+        ? sensor.color
+        : colors[index % colors.length];
+    }
+
     function formatSeen(value) {
       if (!value) return "No readings received";
       const seconds = Math.max(0, (Date.now() - new Date(value).getTime()) / 1000);
@@ -169,9 +176,10 @@
     function renderCards(sensors, profiles) {
       const cards = document.getElementById("cards");
       cards.replaceChildren();
-      sensors.forEach((sensor) => {
+      sensors.forEach((sensor, index) => {
         const card = document.createElement("article");
         card.className = "card";
+        card.style.setProperty("--sensor-color", sensorColor(sensor, index));
         const top = document.createElement("div");
         top.className = "card-top";
         const identity = document.createElement("div");
@@ -324,12 +332,13 @@
       }
 
       sensors.forEach((sensor, index) => {
+        const color = sensorColor(sensor, index);
         const visible = sensor.points.filter((point) => new Date(point.time).getTime() >= xMin);
         if (!visible.length) return;
         const points = visible.map((point) => `${x(point.time).toFixed(1)},${y(Number(point.temperature_f)).toFixed(1)}`).join(" ");
-        svg.append(svgNode("polyline", {points, fill: "none", stroke: colors[index % colors.length], "stroke-width": 2.5, "stroke-linejoin": "round", "stroke-linecap": "round"}));
+        svg.append(svgNode("polyline", {points, fill: "none", stroke: color, "stroke-width": 2.5, "stroke-linejoin": "round", "stroke-linecap": "round"}));
         const latest = visible[visible.length - 1];
-        svg.append(svgNode("circle", {cx: x(latest.time), cy: y(Number(latest.temperature_f)), r: 4, fill: colors[index % colors.length]}));
+        svg.append(svgNode("circle", {cx: x(latest.time), cy: y(Number(latest.temperature_f)), r: 4, fill: color}));
       });
     }
 
@@ -338,7 +347,7 @@
       legend.replaceChildren();
       sensors.forEach((sensor, index) => {
         const item = document.createElement("span");
-        item.style.setProperty("--series-color", colors[index % colors.length]);
+        item.style.setProperty("--series-color", sensorColor(sensor, index));
         item.textContent = sensor.name;
         legend.append(item);
       });

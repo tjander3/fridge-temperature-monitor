@@ -68,7 +68,7 @@ The decoder uses the third-party `hertzg/rtl_433:25.12` image. Its [Dockerfiles 
 
 FDA guidance sets a food refrigerator at 40°F or below and a freezer at 0°F. The lower bounds help detect accidental over-cooling; the drinks and wine presets are quality preferences rather than food-safety limits. This hobby monitor is not a substitute for checking food safety after an outage or prolonged warm period.
 
-Edit `dashboard/sensors.json` for your own installation. Each entry supports a display name, channel, monitoring state, minimum and maximum temperatures, stale-reading timeout, and an optional note. Unknown AcuRite 986 sensors are still stored and displayed with a generated name, which helps discover their IDs before adding them to the file.
+Edit `dashboard/sensors.json` for your own installation. Each entry supports a display name, channel, stable chart/card color, monitoring state, minimum and maximum temperatures, stale-reading timeout, and an optional note. Unknown AcuRite 986 sensors are still stored and displayed with a generated name, which helps discover their IDs before adding them to the file.
 
 ## One-time USB setup
 
