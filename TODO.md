@@ -39,6 +39,6 @@
 
 ## Later
 
-- [ ] Move sensor `41880` into the mini fridge and enable monitoring.
+- [x] Move sensor `41880` into the mini fridge and enable monitoring.
 - [ ] Measure actual desktop power consumption.
 - [ ] Decide whether to move the stack to a Raspberry Pi or low-power mini PC.

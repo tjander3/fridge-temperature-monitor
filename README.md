@@ -62,10 +62,10 @@ The decoder uses the third-party `hertzg/rtl_433:25.12` image. Its [Dockerfiles 
 
 | Sensor ID | Channel | Role | Initial reading | Monitoring |
 | --- | --- | --- | ---: | --- |
-| `41880` | `2F` | Mini fridge; temporarily on the desk | 71°F | Setup mode |
+| `41880` | `2F` | Mini fridge | 71°F | Active |
 | `52572` | `1R` | Basement freezer | -11°F | Active |
 
-The freezer is considered in range at 0°F or below. The mini fridge will use a 32–40°F range after installation. These limits follow FDA cold-storage guidance, but this hobby monitor is not a substitute for checking food safety after an outage or prolonged warm period.
+The freezer is considered in range at 0°F or below. The mini fridge uses a 32–40°F range. These limits follow FDA cold-storage guidance, but this hobby monitor is not a substitute for checking food safety after an outage or prolonged warm period.
 
 Edit `dashboard/sensors.json` for your own installation. Each entry supports a display name, channel, monitoring state, minimum and maximum temperatures, stale-reading timeout, and an optional note. Unknown AcuRite 986 sensors are still stored and displayed with a generated name, which helps discover their IDs before adding them to the file.
 
@@ -210,8 +210,6 @@ The local dashboard provides:
 - SQLite persistence across container rebuilds.
 
 Docker binds the dashboard to loopback TCP port `8080`, so it remains desktop-only unless the LAN proxy and restricted firewall rule above are installed. The decoder and dashboard communicate across the private Compose network.
-
-When sensor `41880` moves into the mini fridge, change its `monitoring` value to `true` in `dashboard/sensors.json`, then restart the stack.
 
 At one reading every two minutes per sensor, plan on roughly 100–250 MB of SQLite growth per year. A retention or downsampling job can be added later if long-term size becomes important.
 

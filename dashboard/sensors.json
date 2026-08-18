@@ -2,11 +2,11 @@
   "41880": {
     "name": "Mini fridge",
     "channel": "2F",
-    "monitoring": false,
+    "monitoring": true,
     "minimum_f": 32,
     "maximum_f": 40,
     "stale_minutes": 10,
-    "note": "Temporarily on the desk for reception testing"
+    "note": "Installed in the mini fridge"
   },
   "52572": {
     "name": "Basement freezer",

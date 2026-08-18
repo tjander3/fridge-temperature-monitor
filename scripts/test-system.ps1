@@ -109,7 +109,18 @@ Add-Check "SQL" "SQLite integrity/write/rollback" ($sql.ExitCode -eq 0 -and $sql
 
 $decoderLogs = Invoke-Wsl docker compose logs --no-color --tail 150 rtl433
 $radioOpened = $decoderLogs.Output -match "(?i)(Found 1 device|Using device 0|Rafael Micro|R820T)"
-Add-Check "Radio" "rtl_433 opened a receiver" ($decoderLogs.ExitCode -eq 0 -and $radioOpened) $(if ($radioOpened) { "Receiver initialization found in rtl_433 logs" } else { $decoderLogs.Output })
+$radioDecoded = $decoderLogs.Output -match '"model"\s*:\s*"Acurite-986"'
+$radioHealthy = $decoderLogs.ExitCode -eq 0 -and ($radioOpened -or $radioDecoded)
+$radioDetail = if ($radioOpened) {
+    "Receiver initialization found in rtl_433 logs"
+}
+elseif ($radioDecoded) {
+    "Recent decoded AcuRite event found in rtl_433 logs"
+}
+else {
+    $decoderLogs.Output
+}
+Add-Check "Radio" "rtl_433 receiver is active" $radioHealthy $radioDetail
 
 if (-not $SkipLiveSensors) {
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($SensorWaitSeconds)
