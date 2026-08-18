@@ -3,7 +3,7 @@
 ## Public release
 
 - [x] Choose and add the MIT License.
-- [ ] Rewrite existing commit metadata to replace the personal email address with the GitHub no-reply address.
+- [x] Rewrite all commit author and committer metadata to use `tjander22@gmail.com`.
 - [x] Run a dedicated secret scanner against the complete Git history.
 - [ ] Complete the live direct-USB system test before describing the new runtime as verified.
 - [ ] Make the GitHub repository public, then enable secret scanning, push protection, Dependabot alerts, and private vulnerability reporting.
