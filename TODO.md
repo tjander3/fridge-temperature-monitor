@@ -13,7 +13,7 @@
 - [x] Install `usbipd-win` from an Administrator PowerShell window.
 - [x] Run `scripts/setup-docker-usb.ps1` for the one-time RTL-SDR share.
 - [x] Start the all-Docker monitor and pass every check in `scripts/test-system.ps1`.
-- [ ] Confirm GitHub Actions passes after the current changes are pushed.
+- [x] Confirm GitHub Actions passes after the current changes are pushed.
 
 ## Notifications
 
