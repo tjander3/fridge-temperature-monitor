@@ -54,9 +54,15 @@ else {
 $wsl = Invoke-Wsl true
 Add-Check "Runtime" "WSL distribution responds" ($wsl.ExitCode -eq 0) $(if ($wsl.ExitCode -eq 0) { $WslDistribution } else { $wsl.Output })
 
-$usbInWsl = Invoke-Wsl bash -lc 'for d in /sys/bus/usb/devices/*; do if [ "$(cat "$d/idVendor" 2>/dev/null)" = 0bda ] && [ "$(cat "$d/idProduct" 2>/dev/null)" = 2838 ]; then echo "$d"; fi; done'
-$wslSeesUsb = $usbInWsl.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($usbInWsl.Output)
-Add-Check "USB" "WSL sees RTL-SDR" $wslSeesUsb $(if ($wslSeesUsb) { $usbInWsl.Output } else { "0bda:2838 absent from WSL USB sysfs" })
+$usbInWsl = Invoke-Wsl udevadm info --export-db
+$rtlUsbRecord = $usbInWsl.Output -split "(?:\r?\n){2,}" |
+    Where-Object {
+        $_ -match "(?m)^E: ID_VENDOR_ID=0bda$" -and
+        $_ -match "(?m)^E: ID_MODEL_ID=2838$"
+    } |
+    Select-Object -First 1
+$wslSeesUsb = $usbInWsl.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($rtlUsbRecord)
+Add-Check "USB" "WSL sees RTL-SDR" $wslSeesUsb $(if ($wslSeesUsb) { "0bda:2838 found in WSL udev database" } else { "0bda:2838 absent from WSL udev database" })
 
 $docker = Invoke-Wsl docker info --format '{{.ServerVersion}}'
 Add-Check "Runtime" "Docker Engine responds" ($docker.ExitCode -eq 0) $(if ($docker.ExitCode -eq 0) { "Server $($docker.Output)" } else { $docker.Output })
@@ -114,8 +120,20 @@ if (-not $SkipLiveSensors) {
             foreach ($sensorId in $SensorIds) {
                 $sensor = $data.sensors | Where-Object { $_.id -eq $sensorId } | Select-Object -First 1
                 if ($sensor -and $sensor.latest) {
-                    $age = [DateTimeOffset]::UtcNow - [DateTimeOffset]::Parse($sensor.latest.observed_at)
-                    if ($age.TotalMinutes -le $FreshMinutes) {
+                    $observedValue = $sensor.latest.observed_at
+                    $observed = if ($observedValue -is [DateTime]) {
+                        [DateTimeOffset]::new($observedValue)
+                    }
+                    else {
+                        [DateTimeOffset]::Parse(
+                            [string]$observedValue,
+                            [Globalization.CultureInfo]::InvariantCulture,
+                            [Globalization.DateTimeStyles]::AssumeUniversal -bor
+                                [Globalization.DateTimeStyles]::AdjustToUniversal
+                        )
+                    }
+                    $age = [DateTimeOffset]::UtcNow - $observed
+                    if ($age.TotalMinutes -ge -1 -and $age.TotalMinutes -le $FreshMinutes) {
                         $sensorDetails[$sensorId] = "$($sensor.name): $($sensor.latest.temperature_f) F, age $([math]::Round($age.TotalMinutes, 1)) min"
                     }
                 }

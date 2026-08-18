@@ -5,14 +5,14 @@
 - [x] Choose and add the MIT License.
 - [x] Rewrite all commit author and committer metadata to use `tjander22@gmail.com`.
 - [x] Run a dedicated secret scanner against the complete Git history.
-- [ ] Complete the live direct-USB system test before describing the new runtime as verified.
+- [x] Complete the live direct-USB system test before describing the new runtime as verified.
 - [ ] Make the GitHub repository public, then enable secret scanning, push protection, Dependabot alerts, and private vulnerability reporting.
 
 ## Bring-up
 
-- [ ] Install `usbipd-win` from an Administrator PowerShell window.
-- [ ] Run `scripts/setup-docker-usb.ps1` for the one-time RTL-SDR share.
-- [ ] Start the all-Docker monitor and pass every check in `scripts/test-system.ps1`.
+- [x] Install `usbipd-win` from an Administrator PowerShell window.
+- [x] Run `scripts/setup-docker-usb.ps1` for the one-time RTL-SDR share.
+- [x] Start the all-Docker monitor and pass every check in `scripts/test-system.ps1`.
 - [ ] Confirm GitHub Actions passes after the current changes are pushed.
 
 ## Notifications

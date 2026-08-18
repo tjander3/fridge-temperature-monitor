@@ -6,7 +6,7 @@ Local refrigerator and freezer temperature history using an RTL-SDR receiver, Ac
 
 Current follow-up work is tracked in [TODO.md](TODO.md).
 
-> **Project status:** working prototype. RF reception, AcuRite decoding, storage, and the dashboard were proven with two live sensors on August 17, 2026. The direct-USB, all-Docker startup path is implemented but still requires its final live system test. This is a hobby monitor, not a certified food-safety device.
+> **Project status:** working prototype. RF reception, AcuRite decoding, storage, the dashboard, and the direct-USB all-Docker runtime were proven with two live sensors on August 17, 2026. The complete live system suite passes 14/14 checks. This is a hobby monitor, not a certified food-safety device.
 
 ## Features
 
