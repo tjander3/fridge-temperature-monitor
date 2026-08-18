@@ -6,6 +6,7 @@
 - [x] Rewrite all commit author and committer metadata to use `tjander22@gmail.com`.
 - [x] Run a dedicated secret scanner against the complete Git history.
 - [x] Complete the live direct-USB system test before describing the new runtime as verified.
+- [ ] Audit environment-specific configuration before making the repository public: identify machine, network, sensor, and notification values; move private or installation-specific values to ignored local configuration or environment variables; provide safe example files and setup documentation; and verify `.gitignore` coverage.
 - [ ] Make the GitHub repository public, then enable secret scanning, push protection, Dependabot alerts, and private vulnerability reporting.
 
 ## Bring-up
