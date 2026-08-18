@@ -18,6 +18,55 @@ SENSORS_PATH = Path(os.environ.get("SENSORS_PATH", APP_DIR / "sensors.json"))
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
 SYSLOG_PORT = int(os.environ.get("SYSLOG_PORT", "1514"))
 
+STORAGE_PROFILES = {
+    "food_refrigerator": {
+        "label": "Food refrigerator",
+        "minimum_f": 33,
+        "maximum_f": 40,
+        "monitoring": True,
+        "description": "Food-safety preset; FDA guidance is 40°F or below.",
+    },
+    "freezer": {
+        "label": "Freezer",
+        "minimum_f": -20,
+        "maximum_f": 0,
+        "monitoring": True,
+        "description": "Frozen-food preset; FDA guidance is 0°F or below.",
+    },
+    "beverage": {
+        "label": "Drinks / beer",
+        "minimum_f": 34,
+        "maximum_f": 45,
+        "monitoring": True,
+        "description": "Quality range for cold drinks and beer; not a food-safety preset.",
+    },
+    "wine": {
+        "label": "Wine cooler",
+        "minimum_f": 45,
+        "maximum_f": 65,
+        "monitoring": True,
+        "description": "General wine-storage range; adjust for the bottles you keep.",
+    },
+    "custom": {
+        "label": "Custom range",
+        "minimum_f": None,
+        "maximum_f": None,
+        "monitoring": True,
+        "description": "Choose your own minimum and maximum temperatures.",
+    },
+    "unmonitored": {
+        "label": "Readings only",
+        "minimum_f": None,
+        "maximum_f": None,
+        "monitoring": False,
+        "description": "Show temperatures without warm or cold alerts.",
+    },
+}
+
+
+def storage_profile_catalog():
+    return [{"id": profile_id, **profile} for profile_id, profile in STORAGE_PROFILES.items()]
+
 
 def utc_now():
     return datetime.now(timezone.utc)
@@ -81,6 +130,18 @@ class ReadingStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS readings_time_idx ON readings(observed_at)"
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sensor_settings (
+                    sensor_id INTEGER PRIMARY KEY,
+                    profile TEXT NOT NULL,
+                    minimum_f REAL,
+                    maximum_f REAL,
+                    monitoring INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def add_event(self, event):
         if event.get("model") != "Acurite-986":
@@ -114,6 +175,59 @@ class ReadingStore:
             )
             return cursor.rowcount == 1
 
+    def update_sensor_profile(self, sensor_id, profile, minimum_f=None, maximum_f=None):
+        try:
+            sensor_id = int(sensor_id)
+        except (TypeError, ValueError) as error:
+            raise ValueError("sensor ID must be an integer") from error
+
+        if profile not in STORAGE_PROFILES:
+            raise ValueError("unknown storage profile")
+
+        profile_config = STORAGE_PROFILES[profile]
+        if profile == "custom":
+            try:
+                minimum_f = float(minimum_f)
+                maximum_f = float(maximum_f)
+            except (TypeError, ValueError) as error:
+                raise ValueError("custom minimum and maximum must be numbers") from error
+            if not -100 <= minimum_f <= 200 or not -100 <= maximum_f <= 200:
+                raise ValueError("custom temperatures must be between -100°F and 200°F")
+            if minimum_f >= maximum_f:
+                raise ValueError("custom minimum must be lower than the maximum")
+        else:
+            minimum_f = profile_config["minimum_f"]
+            maximum_f = profile_config["maximum_f"]
+
+        with self.lock, self._connection() as connection:
+            known_sensor = str(sensor_id) in self.sensors or connection.execute(
+                "SELECT 1 FROM readings WHERE sensor_id = ? LIMIT 1", (sensor_id,)
+            ).fetchone()
+            if not known_sensor:
+                raise KeyError(sensor_id)
+
+            connection.execute(
+                """
+                INSERT INTO sensor_settings (
+                    sensor_id, profile, minimum_f, maximum_f, monitoring, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(sensor_id) DO UPDATE SET
+                    profile = excluded.profile,
+                    minimum_f = excluded.minimum_f,
+                    maximum_f = excluded.maximum_f,
+                    monitoring = excluded.monitoring,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    sensor_id,
+                    profile,
+                    minimum_f,
+                    maximum_f,
+                    int(profile_config["monitoring"]),
+                    iso_utc(utc_now()),
+                ),
+            )
+
     def dashboard_data(self, hours=24):
         hours = max(1, min(int(hours), 24 * 365))
         cutoff = iso_utc(utc_now() - timedelta(hours=hours))
@@ -144,23 +258,44 @@ class ReadingStore:
                 """
             ).fetchall()
 
+            setting_rows = connection.execute(
+                """
+                SELECT sensor_id, profile, minimum_f, maximum_f, monitoring
+                FROM sensor_settings
+                """
+            ).fetchall()
+
         points_by_sensor = {}
         for row in rows:
             points_by_sensor.setdefault(str(row["sensor_id"]), []).append(
                 {"time": row["observed_at"], "temperature_f": row["temperature_f"]}
             )
         latest_by_sensor = {str(row["sensor_id"]): dict(row) for row in latest_rows}
+        settings_by_sensor = {
+            str(row["sensor_id"]): {
+                "profile": row["profile"],
+                "minimum_f": row["minimum_f"],
+                "maximum_f": row["maximum_f"],
+                "monitoring": bool(row["monitoring"]),
+            }
+            for row in setting_rows
+        }
 
         sensors = []
-        known_ids = set(self.sensors) | set(points_by_sensor) | set(latest_by_sensor)
+        known_ids = set(self.sensors) | set(points_by_sensor) | set(latest_by_sensor) | set(settings_by_sensor)
         for sensor_id in sorted(known_ids):
-            config = self.sensors.get(sensor_id, {})
+            config = dict(self.sensors.get(sensor_id, {}))
+            config.update(settings_by_sensor.get(sensor_id, {}))
+            profile = config.get("profile")
+            if profile not in STORAGE_PROFILES:
+                profile = "unmonitored" if not config.get("monitoring", True) else "custom"
             latest = latest_by_sensor.get(sensor_id)
             sensors.append(
                 {
                     "id": int(sensor_id),
                     "name": config.get("name", f"Sensor {sensor_id}"),
                     "channel": config.get("channel") or (latest or {}).get("channel"),
+                    "profile": profile,
                     "monitoring": config.get("monitoring", True),
                     "minimum_f": config.get("minimum_f"),
                     "maximum_f": config.get("maximum_f"),
@@ -174,6 +309,7 @@ class ReadingStore:
         return {
             "generated_at": iso_utc(utc_now()),
             "hours": hours,
+            "profiles": storage_profile_catalog(),
             "sensors": sensors,
         }
 
@@ -234,6 +370,46 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._send_json(self.store.dashboard_data(hours))
             return
         super().do_GET()
+
+    def do_PUT(self):
+        parsed = urlparse(self.path)
+        path_parts = parsed.path.strip("/").split("/")
+        if len(path_parts) != 4 or path_parts[:2] != ["api", "sensors"] or path_parts[3] != "profile":
+            self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            content_length = 0
+        if content_length <= 0 or content_length > 4096:
+            self._send_json({"error": "invalid request body"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        try:
+            payload = json.loads(self.rfile.read(content_length))
+            if not isinstance(payload, dict):
+                raise ValueError("request body must be a JSON object")
+            self.store.update_sensor_profile(
+                path_parts[2],
+                payload.get("profile"),
+                payload.get("minimum_f"),
+                payload.get("maximum_f"),
+            )
+        except json.JSONDecodeError:
+            self._send_json({"error": "request body must be valid JSON"}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as error:
+            self._send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+        except KeyError:
+            self._send_json({"error": "sensor not found"}, HTTPStatus.NOT_FOUND)
+            return
+
+        data = self.store.dashboard_data(24)
+        sensor_id = int(path_parts[2])
+        sensor = next(sensor for sensor in data["sensors"] if sensor["id"] == sensor_id)
+        self._send_json({"sensor": sensor, "profiles": data["profiles"]})
 
     def _send_json(self, value, status=HTTPStatus.OK):
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")

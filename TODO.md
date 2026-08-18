@@ -26,6 +26,10 @@
 - [ ] Consider Twilio only if true SMS is still preferable after trying phone push.
 - [ ] Add an external heartbeat so a sleeping or offline monitoring computer can be detected.
 
+## Dashboard
+
+- [x] Add persistent storage-profile presets and a custom alert range selector to each sensor card.
+
 ## Raspberry Pi deployment
 
 - [ ] Select a Raspberry Pi 4/5, reliable storage, power supply, and Raspberry Pi OS Lite 64-bit.

@@ -1,17 +1,32 @@
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from contextlib import closing
 from datetime import timedelta
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import app
 
 
 SENSORS = {
-    "41880": {"name": "Mini fridge", "monitoring": False, "maximum_f": 40},
-    "52572": {"name": "Basement freezer", "monitoring": True, "maximum_f": 0},
+    "41880": {
+        "name": "Mini fridge",
+        "profile": "unmonitored",
+        "monitoring": False,
+        "maximum_f": 40,
+    },
+    "52572": {
+        "name": "Basement freezer",
+        "profile": "freezer",
+        "monitoring": True,
+        "minimum_f": -20,
+        "maximum_f": 0,
+    },
 }
 
 
@@ -74,6 +89,52 @@ class ReadingStoreTests(unittest.TestCase):
         mini_fridge = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 41880)
         self.assertEqual(mini_fridge["status"], "setup")
 
+    def test_storage_profile_preset_persists_in_sqlite(self):
+        self.store.update_sensor_profile(41880, "beverage")
+        self.store.add_event(self.event(sensor_id=41880, temperature=42))
+        sensor = next(
+            sensor for sensor in self.store.dashboard_data(24)["sensors"]
+            if sensor["id"] == 41880
+        )
+        self.assertEqual(sensor["profile"], "beverage")
+        self.assertTrue(sensor["monitoring"])
+        self.assertEqual(sensor["minimum_f"], 34)
+        self.assertEqual(sensor["maximum_f"], 45)
+        self.assertEqual(sensor["status"], "ok")
+
+        reopened = app.ReadingStore(self.store.database_path, SENSORS)
+        sensor = next(
+            sensor for sensor in reopened.dashboard_data(24)["sensors"]
+            if sensor["id"] == 41880
+        )
+        self.assertEqual(sensor["profile"], "beverage")
+        self.assertEqual(sensor["maximum_f"], 45)
+
+    def test_custom_profile_validates_and_applies_range(self):
+        with self.assertRaisesRegex(ValueError, "minimum must be lower"):
+            self.store.update_sensor_profile(41880, "custom", 50, 40)
+        with self.assertRaisesRegex(ValueError, "unknown storage profile"):
+            self.store.update_sensor_profile(41880, "not-a-profile")
+        with self.assertRaises(KeyError):
+            self.store.update_sensor_profile(12345, "beverage")
+
+        self.store.update_sensor_profile(41880, "custom", 35, 41)
+        self.store.add_event(self.event(sensor_id=41880, temperature=42))
+        sensor = next(
+            sensor for sensor in self.store.dashboard_data(24)["sensors"]
+            if sensor["id"] == 41880
+        )
+        self.assertEqual(sensor["profile"], "custom")
+        self.assertEqual(sensor["status"], "too_warm")
+
+    def test_dashboard_data_includes_profile_catalog(self):
+        data = self.store.dashboard_data(24)
+        profiles = {profile["id"]: profile for profile in data["profiles"]}
+        self.assertEqual(profiles["food_refrigerator"]["maximum_f"], 40)
+        self.assertEqual(profiles["freezer"]["maximum_f"], 0)
+        self.assertEqual(profiles["beverage"]["maximum_f"], 45)
+        self.assertIn("custom", profiles)
+
     def test_reports_low_battery_before_temperature_alert(self):
         event = self.event(temperature=12)
         event["battery_ok"] = 0
@@ -122,6 +183,52 @@ class ReadingStoreTests(unittest.TestCase):
         payload = '<165>1 2026-08-17T22:26:37Z host rtl_433 - - - ' + json.dumps(self.event())
         event = json.loads(payload[payload.find("{"):])
         self.assertEqual(event["id"], 52572)
+
+
+class DashboardApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        database = Path(self.temporary_directory.name) / "api-test.db"
+        app.DashboardHandler.store = app.ReadingStore(database, SENSORS)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), app.DashboardHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.temporary_directory.cleanup()
+
+    def put_profile(self, sensor_id, payload):
+        request = Request(
+            f"{self.base_url}/api/sensors/{sensor_id}/profile",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        with urlopen(request, timeout=2) as response:
+            return response.status, json.load(response)
+
+    def test_profile_endpoint_saves_preset(self):
+        status, result = self.put_profile(41880, {"profile": "beverage"})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["sensor"]["profile"], "beverage")
+        self.assertEqual(result["sensor"]["minimum_f"], 34)
+        self.assertEqual(result["sensor"]["maximum_f"], 45)
+
+    def test_profile_endpoint_rejects_invalid_custom_range(self):
+        with self.assertRaises(HTTPError) as context:
+            self.put_profile(
+                41880,
+                {"profile": "custom", "minimum_f": 50, "maximum_f": 40},
+            )
+        error = context.exception
+        self.assertEqual(error.code, 400)
+        result = json.load(error)
+        error.close()
+        self.assertIn("minimum must be lower", result["error"])
 
 
 if __name__ == "__main__":

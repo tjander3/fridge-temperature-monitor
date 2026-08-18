@@ -14,6 +14,7 @@ Current follow-up work is tracked in [TODO.md](TODO.md).
 - stores deduplicated readings in SQLite;
 - displays current temperature, battery state, last contact, and history charts;
 - detects stale, warm, cold, and low-battery states;
+- lets users select persistent food, freezer, beverage, wine, custom, or readings-only alert profiles from the dashboard;
 - can expose the dashboard to the same private LAN through a restricted Windows firewall rule;
 - includes fast CI tests, full-history secret scanning, and a separate live hardware/system test suite;
 - persists data in a Docker-managed volume.
@@ -60,12 +61,12 @@ The decoder uses the third-party `hertzg/rtl_433:25.12` image. Its [Dockerfiles 
 
 ## Included sensor configuration
 
-| Sensor ID | Channel | Role | Initial reading | Monitoring |
-| --- | --- | --- | ---: | --- |
-| `41880` | `2F` | Mini fridge | 71°F | Active |
-| `52572` | `1R` | Basement freezer | -11°F | Active |
+| Sensor ID | Channel | Role | Default profile | Alert range |
+| --- | --- | --- | --- | ---: |
+| `41880` | `2F` | Mini fridge | Drinks / beer | 34–45°F |
+| `52572` | `1R` | Basement freezer | Freezer | -20–0°F |
 
-The freezer is considered in range at 0°F or below. The mini fridge uses a 32–40°F range. These limits follow FDA cold-storage guidance, but this hobby monitor is not a substitute for checking food safety after an outage or prolonged warm period.
+FDA guidance sets a food refrigerator at 40°F or below and a freezer at 0°F. The lower bounds help detect accidental over-cooling; the drinks and wine presets are quality preferences rather than food-safety limits. This hobby monitor is not a substitute for checking food safety after an outage or prolonged warm period.
 
 Edit `dashboard/sensors.json` for your own installation. Each entry supports a display name, channel, monitoring state, minimum and maximum temperatures, stale-reading timeout, and an optional note. Unknown AcuRite 986 sensors are still stored and displayed with a generated name, which helps discover their IDs before adding them to the file.
 
@@ -207,7 +208,29 @@ The local dashboard provides:
 - 6-hour, 24-hour, 7-day, and 30-day charts;
 - stale-sensor detection after 10 minutes;
 - warm, cold, and low-battery status;
+- a per-sensor storage-profile selector with persistent alert limits;
 - SQLite persistence across container rebuilds.
+
+### Storage profiles
+
+Each sensor card has a **Stored contents** selector. Presets save immediately;
+selecting **Custom range** reveals minimum and maximum fields plus a save
+button.
+
+| Profile | Alert range | Intended use |
+| --- | ---: | --- |
+| Food refrigerator | 33–40°F | Perishable food; FDA maximum is 40°F |
+| Freezer | -20–0°F | Frozen food; FDA target is 0°F or below |
+| Drinks / beer | 34–45°F | Drinks-only quality range; not a food-safety preset |
+| Wine cooler | 45–65°F | General wine-storage range; customize when needed |
+| Custom range | User selected | Any installation-specific minimum and maximum |
+| Readings only | No limits | Keep history without warm or cold alerts |
+
+Dashboard selections are stored in the `sensor_settings` table inside the
+existing SQLite Docker volume, so they survive image and container rebuilds.
+`dashboard/sensors.json` supplies first-run defaults and labels; a saved
+dashboard selection takes precedence. Preset limits are alert thresholds, not
+commands sent to the refrigerator or freezer.
 
 Docker binds the dashboard to loopback TCP port `8080`, so it remains desktop-only unless the LAN proxy and restricted firewall rule above are installed. The decoder and dashboard communicate across the private Compose network.
 

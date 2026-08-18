@@ -2,16 +2,19 @@
   "41880": {
     "name": "Mini fridge",
     "channel": "2F",
+    "profile": "beverage",
     "monitoring": true,
-    "minimum_f": 32,
-    "maximum_f": 40,
+    "minimum_f": 34,
+    "maximum_f": 45,
     "stale_minutes": 10,
     "note": "Installed in the mini fridge"
   },
   "52572": {
     "name": "Basement freezer",
     "channel": "1R",
+    "profile": "freezer",
     "monitoring": true,
+    "minimum_f": -20,
     "maximum_f": 0,
     "stale_minutes": 10
   }

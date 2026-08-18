@@ -31,20 +31,33 @@
     .eyebrow { color: var(--cyan); font-size: 12px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
     h1 { margin: 7px 0 5px; font-size: clamp(30px, 5vw, 48px); letter-spacing: -.045em; }
     .subtitle, .updated { color: var(--muted); }
+    header > div, .card, .chart-panel, .card-top > div { min-width: 0; }
     .updated { font-size: 13px; white-space: nowrap; }
     .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
     .card, .chart-panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(17,37,54,.96), rgba(10,25,37,.96)); border-radius: 18px; box-shadow: 0 22px 55px rgba(0,0,0,.22); }
-    .card { padding: 22px; min-height: 190px; }
+    .card { padding: 22px; min-height: 300px; }
     .card-top { display: flex; justify-content: space-between; align-items: start; gap: 14px; }
     .sensor-name { margin: 0; font-size: 19px; }
     .sensor-meta { margin-top: 4px; color: var(--muted); font-size: 13px; }
+    .sensor-note { margin-top: 6px; color: var(--muted); font-size: 13px; }
     .temperature { margin: 24px 0 8px; font-size: 48px; font-weight: 750; letter-spacing: -.055em; }
     .temperature small { font-size: 20px; color: var(--muted); }
-    .status { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 750; background: rgba(142,166,184,.12); color: var(--muted); }
+    .status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 750; background: rgba(142,166,184,.12); color: var(--muted); }
     .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
     .status.ok { color: var(--green); background: rgba(82,211,154,.12); }
     .status.setup { color: var(--amber); background: rgba(255,184,77,.12); }
     .status.alert { color: var(--red); background: rgba(255,107,120,.12); }
+    .profile-editor { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 15px; }
+    .profile-label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+    select, input { width: 100%; border: 1px solid var(--line); color: var(--text); background: #091824; border-radius: 9px; padding: 9px 10px; font: inherit; font-size: 14px; }
+    select:focus, input:focus { outline: 2px solid rgba(55,201,217,.35); border-color: var(--cyan); }
+    .profile-description { min-height: 34px; margin-top: 8px; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .custom-range { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; margin-top: 10px; }
+    .custom-range[hidden] { display: none; }
+    .custom-range label { color: var(--muted); font-size: 11px; }
+    .custom-range input { margin-top: 5px; }
+    .save-message { min-height: 17px; margin-top: 7px; color: var(--cyan); font-size: 12px; }
+    .save-message.error { color: var(--red); }
     .chart-panel { padding: 22px; }
     .chart-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
     .chart-header h2 { margin: 0; font-size: 19px; }
@@ -58,9 +71,16 @@
     footer { margin-top: 18px; color: var(--muted); font-size: 12px; text-align: center; }
     @media (max-width: 700px) {
       main { width: min(100% - 20px, 1120px); padding-top: 28px; }
-      header { align-items: start; flex-direction: column; }
+      header { align-items: stretch; flex-direction: column; }
+      header > div, .subtitle { width: 100%; max-width: 100%; }
+      h1 { font-size: 28px; line-height: 1.1; }
       .cards { grid-template-columns: 1fr; }
+      .card { overflow: hidden; }
+      .card-top { display: grid; grid-template-columns: minmax(0, 1fr); }
+      .status { justify-self: start; }
       .chart-header { align-items: start; flex-direction: column; }
+      .custom-range { grid-template-columns: 1fr 1fr; }
+      .custom-range button { grid-column: 1 / -1; }
       #chart { min-height: 300px; }
     }
   </style>
@@ -92,14 +112,14 @@
       <div class="legend" id="legend"></div>
     </section>
 
-    <footer>Data stays on this computer. Safety limits: fridge ≤ 40°F and freezer ≤ 0°F.</footer>
+    <footer>Data stays on this computer. Food presets follow FDA maximums; drinks and wine presets are quality preferences.</footer>
   </main>
 
   <script>
     const colors = ["#37c9d9", "#ffb84d", "#b58cff", "#52d39a"];
     const statusText = {
       ok: "Temperature good",
-      setup: "Setup mode",
+      setup: "Alerts off",
       no_data: "Waiting for data",
       stale: "Sensor overdue",
       low_battery: "Low battery",
@@ -116,7 +136,37 @@
       return `Seen ${Math.round(seconds / 3600)} hr ago`;
     }
 
-    function renderCards(sensors) {
+    function formatRange(minimum, maximum) {
+      if (minimum == null && maximum == null) return "No alert limits";
+      if (minimum == null) return `≤ ${Number(maximum).toFixed(0)}°F`;
+      if (maximum == null) return `≥ ${Number(minimum).toFixed(0)}°F`;
+      return `${Number(minimum).toFixed(0)}–${Number(maximum).toFixed(0)}°F`;
+    }
+
+    async function saveSensorProfile(sensor, payload, controls) {
+      controls.select.disabled = true;
+      controls.button.disabled = true;
+      controls.message.classList.remove("error");
+      controls.message.textContent = "Saving…";
+      try {
+        const response = await fetch(`/api/sensors/${sensor.id}/profile`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        controls.message.textContent = "Saved";
+        await refresh();
+      } catch (error) {
+        controls.select.disabled = false;
+        controls.button.disabled = false;
+        controls.message.classList.add("error");
+        controls.message.textContent = error.message;
+      }
+    }
+
+    function renderCards(sensors, profiles) {
       const cards = document.getElementById("cards");
       cards.replaceChildren();
       sensors.forEach((sensor) => {
@@ -144,8 +194,83 @@
         temperature.append(unit);
         const seen = document.createElement("div");
         seen.className = "sensor-meta";
-        seen.textContent = sensor.note || formatSeen(sensor.latest?.observed_at);
-        card.append(top, temperature, seen);
+        seen.textContent = formatSeen(sensor.latest?.observed_at);
+
+        const note = document.createElement("div");
+        note.className = "sensor-note";
+        note.textContent = sensor.note || "";
+
+        const editor = document.createElement("div");
+        editor.className = "profile-editor";
+        const label = document.createElement("label");
+        label.className = "profile-label";
+        label.htmlFor = `profile-${sensor.id}`;
+        label.textContent = "Stored contents";
+        const select = document.createElement("select");
+        select.id = `profile-${sensor.id}`;
+        profiles.forEach((profile) => {
+          const option = document.createElement("option");
+          option.value = profile.id;
+          option.textContent = profile.label;
+          option.selected = profile.id === sensor.profile;
+          select.append(option);
+        });
+        const description = document.createElement("div");
+        description.className = "profile-description";
+        const customRange = document.createElement("div");
+        customRange.className = "custom-range";
+        const minimumLabel = document.createElement("label");
+        minimumLabel.textContent = "Minimum °F";
+        const minimumInput = document.createElement("input");
+        minimumInput.type = "number";
+        minimumInput.step = "1";
+        minimumInput.value = sensor.minimum_f ?? "";
+        minimumInput.setAttribute("aria-label", `${sensor.name} minimum temperature`);
+        minimumLabel.append(minimumInput);
+        const maximumLabel = document.createElement("label");
+        maximumLabel.textContent = "Maximum °F";
+        const maximumInput = document.createElement("input");
+        maximumInput.type = "number";
+        maximumInput.step = "1";
+        maximumInput.value = sensor.maximum_f ?? "";
+        maximumInput.setAttribute("aria-label", `${sensor.name} maximum temperature`);
+        maximumLabel.append(maximumInput);
+        const saveButton = document.createElement("button");
+        saveButton.type = "button";
+        saveButton.textContent = "Save custom range";
+        customRange.append(minimumLabel, maximumLabel, saveButton);
+        const message = document.createElement("div");
+        message.className = "save-message";
+        message.setAttribute("aria-live", "polite");
+
+        const updateEditor = () => {
+          const profile = profiles.find((item) => item.id === select.value);
+          const isCustom = select.value === "custom";
+          customRange.hidden = !isCustom;
+          const minimum = isCustom ? minimumInput.value : profile?.minimum_f;
+          const maximum = isCustom ? maximumInput.value : profile?.maximum_f;
+          description.textContent = `${formatRange(minimum === "" ? null : minimum, maximum === "" ? null : maximum)} · ${profile?.description || ""}`;
+        };
+
+        select.addEventListener("change", async () => {
+          message.textContent = "";
+          updateEditor();
+          if (select.value !== "custom") {
+            await saveSensorProfile(sensor, {profile: select.value}, {select, button: saveButton, message});
+          }
+        });
+        saveButton.addEventListener("click", async () => {
+          await saveSensorProfile(sensor, {
+            profile: "custom",
+            minimum_f: minimumInput.value,
+            maximum_f: maximumInput.value
+          }, {select, button: saveButton, message});
+        });
+        minimumInput.addEventListener("input", updateEditor);
+        maximumInput.addEventListener("input", updateEditor);
+        updateEditor();
+        editor.append(label, select, description, customRange, message);
+        card.append(top, temperature, seen, note, editor);
         cards.append(card);
       });
     }
@@ -224,7 +349,7 @@
         const response = await fetch(`/api/readings?hours=${selectedHours}`, {cache: "no-store"});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        renderCards(data.sensors);
+        renderCards(data.sensors, data.profiles);
         renderChart(data.sensors);
         renderLegend(data.sensors);
         document.getElementById("updated").textContent = `Updated ${new Date(data.generated_at).toLocaleTimeString([], {hour: "numeric", minute: "2-digit", second: "2-digit"})}`;
