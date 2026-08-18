@@ -26,6 +26,17 @@
 - [ ] Consider Twilio only if true SMS is still preferable after trying phone push.
 - [ ] Add an external heartbeat so a sleeping or offline monitoring computer can be detected.
 
+## Raspberry Pi deployment
+
+- [ ] Select a Raspberry Pi 4/5, reliable storage, power supply, and Raspberry Pi OS Lite 64-bit.
+- [ ] Add `compose.pi.yaml` for native Linux USB access, LAN dashboard binding, timezone configuration, and local sensor configuration.
+- [ ] Add a Linux `setup-pi.sh` that checks Docker/Compose, detects the RTL-SDR, handles the conflicting DVB kernel driver when necessary, and starts the stack.
+- [ ] Add a Linux/Pi live system test that does not depend on PowerShell, WSL, or `usbipd-win`.
+- [ ] Add backup and restore commands for migrating the existing SQLite Docker volume from Windows to the Pi.
+- [ ] Document same-LAN access, a DHCP reservation, and private remote access through Tailscale without router port forwarding.
+- [ ] Validate the complete ARM64 runtime with both sensors and confirm automatic recovery after a Pi reboot and RTL-SDR reconnect.
+- [ ] Add Raspberry Pi installation, upgrade, troubleshooting, and rollback instructions to the README.
+
 ## Later
 
 - [ ] Move sensor `41880` into the mini fridge and enable monitoring.
