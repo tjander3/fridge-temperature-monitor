@@ -14,7 +14,7 @@ Current follow-up work is tracked in [TODO.md](TODO.md).
 - stores deduplicated readings in SQLite;
 - displays current temperature, battery state, last contact, and history charts;
 - detects stale, warm, cold, and low-battery states;
-- keeps the dashboard local to the monitoring computer;
+- can expose the dashboard to the same private LAN through a restricted Windows firewall rule;
 - includes fast CI tests, full-history secret scanning, and a separate live hardware/system test suite;
 - persists data in a Docker-managed volume.
 
@@ -51,7 +51,7 @@ RTL-SDR USB
 Docker: rtl_433 -> JSON over private UDP -> dashboard + SQLite
                                                  |
                                                  v
-                              Docker named volume + localhost:8080
+                 Docker named volume + localhost:8080
 ```
 
 There is no Windows `rtl_tcp` process, host database service, or Docker Desktop dependency. The SQLite engine runs inside the dashboard container, and its database lives in the Docker-managed `fridge-temperature-monitor-data` volume.
@@ -122,6 +122,61 @@ To stop everything from another PowerShell window:
 
 Docker retains all readings in its named SQL volume when the containers stop or rebuild.
 
+## View the dashboard from another device on the same Wi-Fi
+
+The Compose configuration binds the dashboard to loopback TCP port `8080`.
+WSL's default Windows integration forwards that service to `127.0.0.1` on the
+Windows host. A narrowly scoped Windows port proxy and firewall rule are needed
+for a phone or tablet on the same LAN.
+
+First, run `ipconfig` and note the IPv4 address and interface name for the
+active Wi-Fi connection. Then open **PowerShell as Administrator**, replace
+the two example values below, and run:
+
+```powershell
+$lanAddress = "192.168.1.50"
+$interfaceAlias = "Wi-Fi"
+
+netsh interface portproxy add v4tov4 `
+  listenport=8080 `
+  listenaddress=$lanAddress `
+  connectport=8080 `
+  connectaddress=127.0.0.1
+
+New-NetFirewallRule `
+  -DisplayName "Fridge Temperature Monitor (LAN)" `
+  -Description "Allow the dashboard from the local subnet on TCP 8080." `
+  -Direction Inbound `
+  -Action Allow `
+  -Protocol TCP `
+  -LocalPort 8080 `
+  -LocalAddress $lanAddress `
+  -RemoteAddress LocalSubnet `
+  -InterfaceAlias $interfaceAlias `
+  -Profile Any
+```
+
+With the monitor running, open `http://<desktop-ip-address>:8080` on a device
+connected to the same Wi-Fi. The desktop must remain powered on and awake.
+Verify the proxy with `netsh interface portproxy show v4tov4`.
+
+The dashboard has no application login. Do not forward port `8080` on the
+router or expose it directly to the internet. For future remote access, use an
+authenticated private network such as Tailscale instead.
+
+If DHCP gives the desktop a different address, delete the old proxy and rerun
+the setup using the new address. To remove LAN access completely, run these
+commands from Administrator PowerShell, substituting the address used during
+setup:
+
+```powershell
+netsh interface portproxy delete v4tov4 `
+  listenport=8080 `
+  listenaddress=192.168.1.50
+
+Remove-NetFirewallRule -DisplayName "Fridge Temperature Monitor (LAN)"
+```
+
 ## Start automatically with Windows
 
 Install the included sign-in Scheduled Task once:
@@ -154,7 +209,7 @@ The local dashboard provides:
 - warm, cold, and low-battery status;
 - SQLite persistence across container rebuilds.
 
-The dashboard listens only on `127.0.0.1`, so it is not exposed to the home network. The decoder and dashboard communicate only across the private Compose network.
+Docker binds the dashboard to loopback TCP port `8080`, so it remains desktop-only unless the LAN proxy and restricted firewall rule above are installed. The decoder and dashboard communicate across the private Compose network.
 
 When sensor `41880` moves into the mini fridge, change its `monitoring` value to `true` in `dashboard/sensors.json`, then restart the stack.
 
