@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$WslDistribution = "Ubuntu-Docker"
+)
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -44,7 +46,7 @@ try {
 
     Write-Host "[5/5] Validating Docker Compose"
     if ($IsWindows) {
-        & wsl.exe -d Ubuntu-Docker --cd $repositoryRoot -- docker compose config --quiet
+        & wsl.exe -d $WslDistribution --cd $repositoryRoot -- docker compose config --quiet
     }
     else {
         & docker compose config --quiet

@@ -1,18 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$RtlTcpPath,
     [string]$WslDistribution = "Ubuntu-Docker"
 )
-
-$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$localRtlTcp = Join-Path $repositoryRoot ".tools\rtl-sdr\v1.3.6\x64\rtl_tcp.exe"
-if (-not $RtlTcpPath) {
-    $RtlTcpPath = if (Test-Path -LiteralPath $localRtlTcp) {
-        $localRtlTcp
-    } else {
-        "rtl_tcp.exe"
-    }
-}
 
 $checks = @(
     [pscustomobject]@{
@@ -26,9 +15,12 @@ $checks = @(
         Detail = "Expected in $WslDistribution"
     },
     [pscustomobject]@{
-        Requirement = "rtl_tcp"
-        Found = [bool](Get-Command $RtlTcpPath -ErrorAction SilentlyContinue)
-        Detail = "Required for Windows USB access"
+        Requirement = "usbipd-win"
+        Found = [bool](
+            (Get-Command usbipd.exe -ErrorAction SilentlyContinue) -or
+            (Test-Path -LiteralPath "C:\Program Files\usbipd-win\usbipd.exe")
+        )
+        Detail = "Required to attach the RTL-SDR directly to WSL"
     }
 )
 

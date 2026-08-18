@@ -17,18 +17,13 @@ if ($LASTEXITCODE -ne 0) {
 
 if (Test-Path -LiteralPath $processFile) {
     $monitorProcesses = Get-Content -Raw -LiteralPath $processFile | ConvertFrom-Json
-    $expectedProcesses = @(
-        @{ Id = $monitorProcesses.rtl_tcp_pid; Name = "rtl_tcp" },
-        @{ Id = $monitorProcesses.wsl_keepalive_pid; Name = "wsl" }
-    )
-    foreach ($expected in $expectedProcesses) {
-        $process = Get-Process -Id $expected.Id -ErrorAction SilentlyContinue
-        if ($process -and $process.ProcessName -eq $expected.Name) {
+    if ($monitorProcesses.usbipd_attach_pid) {
+        $process = Get-Process -Id $monitorProcesses.usbipd_attach_pid -ErrorAction SilentlyContinue
+        if ($process -and $process.ProcessName -eq "usbipd") {
             Stop-Process -Id $process.Id -Force
         }
     }
     Remove-Item -LiteralPath $processFile -Force
-} else {
-    Get-Process rtl_tcp -ErrorAction SilentlyContinue | Stop-Process -Force
 }
-Write-Host "Cold Storage Monitor stopped. Stored readings remain in data\fridge-monitor.db."
+
+Write-Host "Cold Storage Monitor stopped. Docker retained the SQL database volume."

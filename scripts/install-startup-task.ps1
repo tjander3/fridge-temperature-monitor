@@ -1,12 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$TaskName = "Fridge Temperature Monitor"
+    [string]$TaskName = "Fridge Temperature Monitor",
+    [string]$WslDistribution = "Ubuntu-Docker"
 )
 
 $ErrorActionPreference = "Stop"
 $startScript = (Resolve-Path (Join-Path $PSScriptRoot "start-monitor.ps1")).Path
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScript`""
+$arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScript`" -WslDistribution `"$WslDistribution`""
 
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser

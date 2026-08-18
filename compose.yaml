@@ -5,7 +5,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
-      - ./data:/data
+      - monitor-data:/data
     restart: unless-stopped
     healthcheck:
       test:
@@ -20,11 +20,11 @@ services:
 
   rtl433:
     image: hertzg/rtl_433:25.12
-    extra_hosts:
-      - "host.docker.internal:${WINDOWS_HOST_IP:-host-gateway}"
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
     command:
       - -d
-      - rtl_tcp:host.docker.internal:1234
+      - ":00000001"
       - -f
       - 433.92M
       - -R
@@ -45,3 +45,7 @@ services:
       dashboard:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  monitor-data:
+    name: fridge-temperature-monitor-data

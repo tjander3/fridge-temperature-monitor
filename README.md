@@ -1,36 +1,101 @@
 # Fridge Temperature Monitor
 
-Local refrigerator and freezer temperature history using an RTL-SDR Blog V3, two AcuRite 00986M sensors, Docker, SQLite, and a small web dashboard.
+[![Tests](https://github.com/tjander3/fridge-temperature-monitor/actions/workflows/tests.yml/badge.svg)](https://github.com/tjander3/fridge-temperature-monitor/actions/workflows/tests.yml)
 
-The receiver was proven with both sensors on August 17, 2026. The current milestone stores readings and plots them at [http://localhost:8080](http://localhost:8080).
+Local refrigerator and freezer temperature history using an RTL-SDR receiver, AcuRite 00986M sensors, Docker, SQLite, and a small web dashboard.
+
+Current follow-up work is tracked in [TODO.md](TODO.md).
+
+> **Project status:** working prototype. RF reception, AcuRite decoding, storage, and the dashboard were proven with two live sensors on August 17, 2026. The direct-USB, all-Docker startup path is implemented but still requires its final live system test. This is a hobby monitor, not a certified food-safety device.
+
+## Features
+
+- decodes AcuRite 00986M fridge/freezer sensors on 433.92 MHz;
+- stores deduplicated readings in SQLite;
+- displays current temperature, battery state, last contact, and history charts;
+- detects stale, warm, cold, and low-battery states;
+- keeps the dashboard local to the monitoring computer;
+- includes fast CI tests, full-history secret scanning, and a separate live hardware/system test suite;
+- persists data in a Docker-managed volume.
+
+## Requirements
+
+### Hardware
+
+- an RTL-SDR receiver compatible with `rtl_433`;
+- a 433 MHz antenna;
+- one or more AcuRite 00986M wireless fridge/freezer sensors.
+
+The original setup uses an RTL-SDR Blog V3 and the two sensors listed below, but contributors should replace the sensor configuration with their own IDs and thresholds.
+
+### Software
+
+- Windows with WSL2 and a systemd-enabled Ubuntu distribution;
+- [Docker Engine and the Compose plugin installed inside Ubuntu](https://docs.docker.com/engine/install/ubuntu/); no Docker Desktop is required;
+- [`usbipd-win`](https://learn.microsoft.com/en-us/windows/wsl/connect-usb) for forwarding the RTL-SDR into WSL;
+- PowerShell 7, Python, and Node.js for running all development checks locally.
+
+The scripts default to a WSL distribution named `Ubuntu-Docker`. If yours has another name, pass it explicitly, for example `-WslDistribution Ubuntu`, to the PowerShell scripts.
 
 ## Architecture
-
-Docker Engine runs inside the `Ubuntu-Docker` WSL2 distribution without Docker Desktop. The USB receiver remains attached to Windows:
 
 ```text
 AcuRite sensors
       |
       | 433.92 MHz
       v
-RTL-SDR USB -> rtl_tcp on Windows -> rtl_433 container
-                                           |
-                                           | JSON over private UDP
-                                           v
-                                  dashboard container
-                                  SQLite + local website
+RTL-SDR USB
+      |
+      | usbipd-win forwards the physical device to WSL
+      v
+Docker: rtl_433 -> JSON over private UDP -> dashboard + SQLite
+                                                 |
+                                                 v
+                              Docker named volume + localhost:8080
 ```
 
-`rtl_433` enables only protocol 41 for the AcuRite 00986M. It sends events to the dashboard using its syslog-compatible UDP output, which its upstream documentation recommends over a process pipe for a stable integration. Repeated RF packets are deduplicated before storage.
+There is no Windows `rtl_tcp` process, host database service, or Docker Desktop dependency. The SQLite engine runs inside the dashboard container, and its database lives in the Docker-managed `fridge-temperature-monitor-data` volume.
 
-## Sensors
+The decoder uses the third-party `hertzg/rtl_433:25.12` image. Its [Dockerfiles and publishing workflow are public](https://github.com/hertzg/rtl_433_docker), and the official `rtl_433` project links to those images. The tag corresponds to the upstream 25.12 release; pinning a verified image digest remains a release-hardening task.
+
+## Included sensor configuration
 
 | Sensor ID | Channel | Role | Initial reading | Monitoring |
 | --- | --- | --- | ---: | --- |
 | `41880` | `2F` | Mini fridge; temporarily on the desk | 71°F | Setup mode |
 | `52572` | `1R` | Basement freezer | -11°F | Active |
 
-The freezer is considered in range at 0°F or below. The mini fridge will use a 32–40°F range after it is installed. These limits follow FDA cold-storage guidance, but this hobby monitor is not a substitute for checking food safety after an outage or prolonged warm period.
+The freezer is considered in range at 0°F or below. The mini fridge will use a 32–40°F range after installation. These limits follow FDA cold-storage guidance, but this hobby monitor is not a substitute for checking food safety after an outage or prolonged warm period.
+
+Edit `dashboard/sensors.json` for your own installation. Each entry supports a display name, channel, monitoring state, minimum and maximum temperatures, stale-reading timeout, and an optional note. Unknown AcuRite 986 sensors are still stored and displayed with a generated name, which helps discover their IDs before adding them to the file.
+
+## One-time USB setup
+
+Install WSL, enable systemd if your distribution does not already use it, and install Docker Engine inside that distribution using the official links above. Confirm `docker compose version` works inside WSL.
+
+WSL cannot access a Windows USB device by itself. Install Microsoft's recommended `usbipd-win` helper from an Administrator PowerShell window:
+
+```powershell
+winget install --interactive --exact dorssel.usbipd-win
+```
+
+Then run this repository's setup script:
+
+```powershell
+.\scripts\setup-docker-usb.ps1
+```
+
+Approve the Administrator prompt. This shares only hardware ID `0bda:2838`, the RTL-SDR. Sharing persists across reboots; attaching does not. The normal monitor launcher handles attachment and reattachment automatically without Administrator rights.
+
+While attached to WSL, the receiver is unavailable to Windows radio programs. Stop the monitor before intentionally returning the device to Windows.
+
+Check the remaining prerequisites with:
+
+```powershell
+.\scripts\check-prerequisites.ps1
+```
+
+Pass `-WslDistribution <name>` when the distribution is not named `Ubuntu-Docker`.
 
 ## Start and stop
 
@@ -40,13 +105,12 @@ Open PowerShell in this repository and run:
 .\scripts\start-monitor.ps1
 ```
 
-The script:
+The launcher:
 
-1. Detects the current Windows/WSL bridge address.
-2. Starts `rtl_tcp` on Windows for USB access.
-3. Keeps one lightweight WSL session alive so its services do not suspend.
-4. Starts Docker Engine and the Compose services inside WSL.
-5. Supervises both the Windows radio bridge and WSL session.
+1. Starts an auto-attaching USB/IP session for the RTL-SDR.
+2. Keeps WSL active for as long as monitoring runs.
+3. Starts Docker Engine and the Compose services.
+4. Supervises USB attachment and reconnects after a device reset.
 
 Leave the PowerShell process running, then open [http://localhost:8080](http://localhost:8080). The page refreshes every 30 seconds, while each sensor normally transmits about every two minutes.
 
@@ -56,17 +120,17 @@ To stop everything from another PowerShell window:
 .\scripts\stop-monitor.ps1
 ```
 
-Readings remain in `data\fridge-monitor.db` when the monitor stops.
+Docker retains all readings in its named SQL volume when the containers stop or rebuild.
 
 ## Start automatically with Windows
 
-The monitor can start at sign-in through a Windows Scheduled Task. Install it once from PowerShell:
+Install the included sign-in Scheduled Task once:
 
 ```powershell
 .\scripts\install-startup-task.ps1
 ```
 
-This only installs the task; it does not change Windows power settings. The task starts at the next sign-in and restarts the supervisor up to three times if it fails. To start it immediately:
+The task starts at the next sign-in and restarts the supervisor up to three times after an unexpected failure. To start it immediately:
 
 ```powershell
 Start-ScheduledTask -TaskName "Fridge Temperature Monitor"
@@ -78,9 +142,9 @@ To remove it later:
 Unregister-ScheduledTask -TaskName "Fridge Temperature Monitor"
 ```
 
-Windows must stay awake for continuous monitoring. Sleeping, shutting down, or signing out stops the Windows radio bridge. Configure the desktop not to sleep while plugged in if continuous history is important.
+Windows must remain awake for continuous monitoring. Sleeping, shutting down, or signing out stops USB forwarding. Configure the desktop not to sleep while plugged in if uninterrupted history is important.
 
-## Dashboard and data
+## Dashboard and SQL data
 
 The local dashboard provides:
 
@@ -88,19 +152,21 @@ The local dashboard provides:
 - 6-hour, 24-hour, 7-day, and 30-day charts;
 - stale-sensor detection after 10 minutes;
 - warm, cold, and low-battery status;
-- SQLite persistence across container restarts.
+- SQLite persistence across container rebuilds.
 
-The dashboard listens only on `127.0.0.1`, so it is available on this computer but not exposed to the home network. `rtl_tcp` is unencrypted and must never be port-forwarded through the router.
+The dashboard listens only on `127.0.0.1`, so it is not exposed to the home network. The decoder and dashboard communicate only across the private Compose network.
 
-When sensor `41880` moves into the mini fridge, change its `monitoring` value to `true` in `dashboard/sensors.json`, then rerun `start-monitor.ps1`.
-
-To back up the history, stop the monitor briefly and copy:
-
-```text
-data\fridge-monitor.db
-```
+When sensor `41880` moves into the mini fridge, change its `monitoring` value to `true` in `dashboard/sensors.json`, then restart the stack.
 
 At one reading every two minutes per sensor, plan on roughly 100–250 MB of SQLite growth per year. A retention or downsampling job can be added later if long-term size becomes important.
+
+The database is not committed to Git. Back up the `fridge-temperature-monitor-data` Docker volume before destructive Docker maintenance or moving the installation to another computer.
+
+## Planned notifications
+
+The recommended next phase is a Dockerized notifier with SMTP email plus optional ntfy phone push. It will require consecutive bad readings, suppress duplicate messages, record alert state in SQLite, and send recovery notifications. True SMS through Twilio can be added later if phone push is not sufficient.
+
+See [the notification plan](docs/notifications.md) for alert timing, secrets, reliability limitations, and the tests that will accompany implementation.
 
 ## Power strategy
 
@@ -116,40 +182,48 @@ annual cost = watts / 1000 × 8760 hours × electricity price per kWh
 | Desktop kept on only for this project | 40–100 W | $64–$159 |
 | Future Raspberry Pi or low-power mini PC | 5–10 W | $8–$16 |
 
-These are planning ranges, not measurements. A plug-in power meter is the best way to measure this desktop both before and after starting the monitor. If the desktop would otherwise sleep, prototype here and later move the same containers and SDR to a Raspberry Pi or low-power mini PC.
+These are planning ranges, not measurements. A plug-in power meter is the best way to measure this desktop before and after starting the stack. The same Compose services and RTL-SDR can move to a Raspberry Pi later; on native Linux, remove the Windows USB/IP launcher and expose `/dev/bus/usb` directly.
 
-## Manual radio test
+## Tests
 
-For troubleshooting, run the two halves separately in two PowerShell windows:
-
-```powershell
-.\scripts\start-rtl-tcp.ps1
-```
+Run the same fast suite used by GitHub Actions before each commit:
 
 ```powershell
-.\scripts\start-decoder.ps1
+.\scripts\test-ci.ps1
 ```
 
-The first process owns the Windows USB receiver. The second builds and starts the Docker stack. The included antenna should have both arms extended to roughly 17 cm and oriented vertically; leave the bias tee off.
+It parses every PowerShell script, compiles Python, runs the dashboard and database unit tests, checks the dashboard JavaScript syntax, and validates the Compose file.
 
-## Development checks
+On Windows, specify a differently named WSL distribution with `-WslDistribution <name>`.
 
-The dashboard uses only the Python standard library. Run its tests without installing dependencies:
+After starting the monitor, run the live hardware and system suite:
 
 ```powershell
-python -m unittest discover -s dashboard -p "test_*.py" -v
+.\scripts\test-system.ps1
 ```
 
-Validate the Compose configuration inside WSL:
+The live suite prints an individual pass/fail result for:
 
-```powershell
-.\scripts\start-decoder.ps1
-```
+- `usbipd-win`, the Windows RTL-SDR, USB attachment, and WSL USB visibility;
+- Docker Engine, both Compose containers, and rtl_433 receiver initialization;
+- dashboard health API and recognizable UI content;
+- SQLite integrity plus a real transactional write and rollback;
+- fresh readings from sensor `41880` and sensor `52572`.
+
+It waits up to three minutes for both sensors because they transmit periodically, then returns a nonzero exit code if any check fails. Use `-SkipLiveSensors` only when deliberately testing without powered sensors; USB, Docker, web, SQL, and decoder checks still run. GitHub Actions runs the hardware-independent suite automatically on every push and pull request.
 
 ## References
 
+- [Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
+- [Microsoft: systemd in WSL](https://learn.microsoft.com/en-us/windows/wsl/systemd)
+- [Microsoft: connect USB devices to WSL](https://learn.microsoft.com/en-us/windows/wsl/connect-usb)
+- [`usbipd-win` WSL documentation](https://github.com/dorssel/usbipd-win/wiki/WSL-support)
 - [`rtl_433` operation and output documentation](https://github.com/merbanan/rtl_433/blob/master/docs/OPERATION.md)
 - [`rtl_433` Docker images](https://github.com/hertzg/rtl_433_docker)
 - [AcuRite 986 decoder source](https://github.com/merbanan/rtl_433/blob/master/src/devices/acurite_986.c)
 - [FDA refrigerator and freezer temperature guidance](https://www.fda.gov/food/buy-store-serve-safe-food/refrigerator-thermometers-cold-facts-about-food-safety)
 - [EIA Short-Term Energy Outlook](https://www.eia.gov/outlooks/steo/)
+
+## License
+
+Released under the [MIT License](LICENSE).
