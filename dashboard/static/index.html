@@ -285,6 +285,16 @@
       return `Seen ${Math.round(seconds / 3600)} hr ago`;
     }
 
+    function formatSeenTooltip(value) {
+      if (!value) return "";
+      const observedAt = new Date(value);
+      if (Number.isNaN(observedAt.getTime())) return "";
+      return `Last seen ${observedAt.toLocaleString([], {
+        dateStyle: "medium",
+        timeStyle: "long"
+      })}`;
+    }
+
     function formatRange(minimum, maximum) {
       if (minimum == null && maximum == null) return "No alert limits";
       if (minimum == null) return `≤ ${Number(maximum).toFixed(0)}°F`;
@@ -345,6 +355,7 @@
         const seen = document.createElement("div");
         seen.className = "sensor-meta";
         seen.textContent = formatSeen(sensor.latest?.observed_at);
+        seen.title = formatSeenTooltip(sensor.latest?.observed_at);
 
         const note = document.createElement("div");
         note.className = "sensor-note";
