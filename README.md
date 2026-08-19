@@ -209,7 +209,7 @@ The local dashboard provides:
 
 - latest temperature, battery state, and last contact;
 - 6-hour, 24-hour, 7-day, and 30-day charts;
-- stale-sensor detection after 10 minutes;
+- stale-sensor detection after two hours;
 - warm, cold, and low-battery status;
 - a per-sensor storage-profile selector with persistent alert limits;
 - SQLite persistence across container rebuilds.

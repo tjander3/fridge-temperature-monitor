@@ -75,7 +75,23 @@ class ReadingStoreTests(unittest.TestCase):
         )
 
     def test_reports_stale_and_warm_readings(self):
-        old_time = app.iso_utc(app.utc_now() - timedelta(minutes=20))
+        recent_store = app.ReadingStore(
+            Path(self.temporary_directory.name) / "recent.db", SENSORS
+        )
+        recent_time = app.iso_utc(
+            app.utc_now() - timedelta(minutes=app.DEFAULT_STALE_MINUTES - 1)
+        )
+        recent_store.add_event(self.event(observed_at=recent_time))
+        recent_freezer = next(
+            sensor
+            for sensor in recent_store.dashboard_data(24)["sensors"]
+            if sensor["id"] == 52572
+        )
+        self.assertEqual(recent_freezer["status"], "ok")
+
+        old_time = app.iso_utc(
+            app.utc_now() - timedelta(minutes=app.DEFAULT_STALE_MINUTES + 10)
+        )
         self.store.add_event(self.event(observed_at=old_time))
         freezer = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 52572)
         self.assertEqual(freezer["status"], "stale")

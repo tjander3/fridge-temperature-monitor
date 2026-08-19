@@ -12,7 +12,14 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
-from app import DATABASE_PATH, ReadingStore, iso_utc, load_sensors, utc_now
+from app import (
+    DATABASE_PATH,
+    DEFAULT_STALE_MINUTES,
+    ReadingStore,
+    iso_utc,
+    load_sensors,
+    utc_now,
+)
 
 
 HEALTH_PATH = Path(os.environ.get("NOTIFIER_HEALTH_PATH", "/tmp/notifier-health.json"))
@@ -311,7 +318,9 @@ class AlertEngine:
                 minimum = sensor.get("minimum_f")
                 maximum = sensor.get("maximum_f")
                 monitoring = bool(sensor.get("monitoring", True))
-                stale_minutes = int(base.get("stale_minutes", 10))
+                stale_minutes = int(
+                    base.get("stale_minutes", DEFAULT_STALE_MINUTES)
+                )
 
                 conditions = {
                     "too_warm": latest is not None

@@ -10,7 +10,7 @@ so container rebuilds do not resend old alerts.
 | Event | Trigger | Repeat behavior | Recovery |
 | --- | --- | --- | --- |
 | Too warm or too cold | Two distinct consecutive bad readings | Every 60 minutes while unresolved | After two consecutive in-range readings |
-| Sensor stale | No reading for the sensor's configured timeout | Every 4 hours | After the next fresh reading |
+| Sensor stale | No reading for the sensor's configured timeout (two hours by default) | Every 4 hours | After the next fresh reading |
 | Low battery | Two distinct consecutive low-battery readings | Every 7 days | After the next good-battery reading |
 
 The notifier remains healthy when every channel is disabled. If a channel is

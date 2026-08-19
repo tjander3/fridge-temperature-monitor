@@ -20,6 +20,7 @@ SENSORS_PATH = Path(os.environ.get("SENSORS_PATH", APP_DIR / "sensors.json"))
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
 SYSLOG_PORT = int(os.environ.get("SYSLOG_PORT", "1514"))
 ADMIN_API_TOKEN = os.environ.get("ADMIN_API_TOKEN", "").strip()
+DEFAULT_STALE_MINUTES = 120
 
 STORAGE_PROFILES = {
     "food_refrigerator": {
@@ -473,7 +474,7 @@ class ReadingStore:
             return "no_data"
 
         observed = datetime.fromisoformat(latest["observed_at"].replace("Z", "+00:00"))
-        stale_minutes = int(config.get("stale_minutes", 10))
+        stale_minutes = int(config.get("stale_minutes", DEFAULT_STALE_MINUTES))
         if utc_now() - observed > timedelta(minutes=stale_minutes):
             return "stale"
         if latest.get("battery_ok") == 0:
