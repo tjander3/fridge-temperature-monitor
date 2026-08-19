@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY app.py notifier.py sensors.json ./
+COPY app.py notifier.py ./
+COPY sensors.example.json ./sensors.json
 COPY static ./static
 
 EXPOSE 8080 1514/udp

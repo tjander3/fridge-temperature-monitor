@@ -1,7 +1,7 @@
 {
-  "41880": {
-    "name": "Mini fridge",
-    "channel": "2F",
+  "10001": {
+    "name": "Drinks fridge",
+    "channel": "1R",
     "profile": "beverage",
     "monitoring": true,
     "minimum_f": 34,
@@ -9,9 +9,9 @@
     "stale_minutes": 120,
     "color": "#37c9d9"
   },
-  "52572": {
-    "name": "Basement freezer",
-    "channel": "1R",
+  "10002": {
+    "name": "Food freezer",
+    "channel": "2F",
     "profile": "freezer",
     "monitoring": true,
     "minimum_f": -20,

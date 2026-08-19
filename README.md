@@ -28,7 +28,8 @@ Current follow-up work is tracked in [TODO.md](TODO.md).
 - a 433 MHz antenna;
 - one or more AcuRite 00986M wireless fridge/freezer sensors.
 
-The original setup uses an RTL-SDR Blog V3 and the two sensors listed below, but contributors should replace the sensor configuration with their own IDs and thresholds.
+The original setup uses an RTL-SDR Blog V3 and two AcuRite sensors, but every
+installation supplies its own ignored sensor configuration.
 
 ### Software
 
@@ -62,16 +63,33 @@ There is no Windows `rtl_tcp` process, host database service, or Docker Desktop 
 
 The decoder uses the third-party `hertzg/rtl_433:25.12` image. Its [Dockerfiles and publishing workflow are public](https://github.com/hertzg/rtl_433_docker), and the official `rtl_433` project links to those images. The tag corresponds to the upstream 25.12 release; pinning a verified image digest remains a release-hardening task.
 
-## Included sensor configuration
+## Configure sensors
 
 | Sensor ID | Channel | Role | Default profile | Alert range |
 | --- | --- | --- | --- | ---: |
-| `41880` | `2F` | Mini fridge | Drinks / beer | 34–45°F |
-| `52572` | `1R` | Basement freezer | Freezer | -20–0°F |
+| `10001` | `1R` | Drinks fridge | Drinks / beer | 34–45°F |
+| `10002` | `2F` | Food freezer | Freezer | -20–0°F |
 
 FDA guidance sets a food refrigerator at 40°F or below and a freezer at 0°F. The lower bounds help detect accidental over-cooling; the drinks and wine presets are quality preferences rather than food-safety limits. This hobby monitor is not a substitute for checking food safety after an outage or prolonged warm period.
 
-Edit `dashboard/sensors.json` for your own installation. Each entry supports a display name, channel, stable chart/card color, monitoring state, minimum and maximum temperatures, stale-reading timeout, and an optional note. Unknown AcuRite 986 sensors are still stored and displayed with a generated name, which helps discover their IDs before adding them to the file.
+The table contains fictitious example IDs. Create the ignored local files before
+starting the monitor:
+
+```powershell
+Copy-Item .env.example .env
+Copy-Item dashboard/sensors.example.json dashboard/sensors.local.json
+```
+
+Edit `dashboard/sensors.local.json` with the IDs reported by `rtl_433` and keep
+`SENSORS_FILE=./dashboard/sensors.local.json` in `.env`. Each entry supports a
+display name, channel, stable chart/card color, monitoring state, minimum and
+maximum temperatures, stale-reading timeout, and an optional note. Unknown
+AcuRite 986 sensors are still stored and displayed with a generated name, which
+helps discover their IDs before adding them to the file.
+
+Sensor IDs are broadcast over unencrypted 433 MHz radio. They are not
+credentials, but the local file is ignored so a published fork does not reveal
+installation-specific device identifiers or room labels.
 
 ## One-time USB setup
 
@@ -231,9 +249,9 @@ button.
 
 Dashboard selections are stored in the `sensor_settings` table inside the
 existing SQLite Docker volume, so they survive image and container rebuilds.
-`dashboard/sensors.json` supplies first-run defaults and labels; a saved
-dashboard selection takes precedence. Preset limits are alert thresholds, not
-commands sent to the refrigerator or freezer.
+The file selected by `SENSORS_FILE` supplies first-run defaults and labels; a
+saved dashboard selection takes precedence. Preset limits are alert thresholds,
+not commands sent to the refrigerator or freezer.
 
 Docker binds the dashboard to loopback TCP port `8080`, so it remains desktop-only unless the LAN proxy and restricted firewall rule above are installed. The decoder and dashboard communicate across the private Compose network.
 
@@ -257,9 +275,13 @@ gh auth login
 python scripts/setup_backups.py
 ```
 
-The defaults create or reuse `tjander3/home-app-backups`, refuse to continue
-unless GitHub reports that repository as **private**, clone it beside this
-repository, create and push the first backup, and install the Windows task
+The backup repository uses your existing Git name and email. Configure them
+with `git config --global user.name` and `git config --global user.email` before
+setup if they are not already present.
+
+The defaults derive `<authenticated-user>/home-app-backups` from GitHub CLI,
+refuse to continue unless GitHub reports that repository as **private**, clone
+it beside this repository, create and push the first backup, and install the Windows task
 `Fridge Temperature Monitor Weekly Database Backup`. It runs every Sunday at
 3:00 AM. The task uses the current Windows login and `StartWhenAvailable`, so a
 missed run starts after the next login when the network is available.
@@ -350,7 +372,7 @@ The live suite prints an individual pass/fail result for:
 - Docker Engine, all three Compose services, notifier health, and rtl_433 receiver initialization;
 - dashboard health API and recognizable UI content;
 - SQLite integrity plus a real transactional write and rollback;
-- fresh readings from sensor `41880` and sensor `52572`.
+- fresh readings from every sensor in the selected local configuration.
 
 It waits up to three minutes for both sensors because they transmit periodically, then returns a nonzero exit code if any check fails. Use `-SkipLiveSensors` only when deliberately testing without powered sensors; USB, Docker, web, SQL, and decoder checks still run. GitHub Actions runs the hardware-independent suite automatically on every push and pull request.
 

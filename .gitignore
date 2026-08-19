@@ -1,4 +1,5 @@
 .env
+dashboard/sensors.local.json
 data/
 *.log
 .vscode/

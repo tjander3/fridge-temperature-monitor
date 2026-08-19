@@ -1,10 +1,12 @@
 import io
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 import backup_database
 import setup_backups
@@ -89,18 +91,30 @@ class ScheduleTests(unittest.TestCase):
 
 
 class GitHubSafetyTests(unittest.TestCase):
+    @patch("setup_backups.run")
+    def test_default_backup_repository_uses_authenticated_login(self, command):
+        command.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="octocat\n", stderr=""
+        )
+
+        self.assertEqual(
+            setup_backups.default_github_repository("gh"),
+            "octocat/home-app-backups",
+        )
+        command.assert_called_once_with(["gh", "api", "user", "--jq", ".login"])
+
     def test_extracts_repository_from_supported_ssh_remotes(self):
         self.assertEqual(
             backup_database.repository_name_from_remote(
-                "git@github.com:tjander3/home-app-backups.git"
+                "git@github.com:octocat/home-app-backups.git"
             ),
-            "tjander3/home-app-backups",
+            "octocat/home-app-backups",
         )
         self.assertEqual(
             backup_database.repository_name_from_remote(
-                "ssh://git@ssh.github.com:443/tjander3/home-app-backups.git"
+                "ssh://git@ssh.github.com:443/octocat/home-app-backups.git"
             ),
-            "tjander3/home-app-backups",
+            "octocat/home-app-backups",
         )
 
     def test_rejects_non_github_remote(self):

@@ -14,7 +14,6 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 
-DEFAULT_GITHUB_REPOSITORY = "tjander3/home-app-backups"
 DEFAULT_BACKUP_REPOSITORY = (
     Path(__file__).resolve().parents[2] / "home-app-backups"
 )
@@ -104,6 +103,26 @@ def ensure_private_github_repository(gh: str, name: str) -> dict[str, str]:
     return repository
 
 
+def default_github_repository(gh: str) -> str:
+    login = run([gh, "api", "user", "--jq", ".login"]).stdout.strip()
+    if not login:
+        raise SetupError("GitHub CLI did not return the authenticated username")
+    return f"{login}/home-app-backups"
+
+
+def ensure_git_identity(path: Path) -> None:
+    identity = {
+        key: run(["git", "config", "--get", key], cwd=path, check=False)
+        .stdout.strip()
+        for key in ("user.name", "user.email")
+    }
+    missing = [key for key, value in identity.items() if not value]
+    if missing:
+        raise SetupError(
+            "Git identity is not configured; set " + " and ".join(missing)
+        )
+
+
 def initialize_local_repository(path: Path, remote: dict[str, str]) -> None:
     if (path / ".git").is_dir():
         existing = run(["git", "remote", "get-url", "origin"], cwd=path).stdout.strip()
@@ -111,14 +130,13 @@ def initialize_local_repository(path: Path, remote: dict[str, str]) -> None:
             raise SetupError(
                 f"existing backup repository uses unexpected origin: {existing}"
             )
-        return
-    if path.exists() and any(path.iterdir()):
-        raise SetupError(f"backup directory is not empty: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    run(["git", "clone", remote["sshUrl"], str(path)])
-    run(["git", "checkout", "-B", "main"], cwd=path)
-    run(["git", "config", "user.name", "Tyler Anderson"], cwd=path)
-    run(["git", "config", "user.email", "tjander22@gmail.com"], cwd=path)
+    else:
+        if path.exists() and any(path.iterdir()):
+            raise SetupError(f"backup directory is not empty: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        run(["git", "clone", remote["sshUrl"], str(path)])
+        run(["git", "checkout", "-B", "main"], cwd=path)
+    ensure_git_identity(path)
 
 
 def task_start_boundary(day: str, time: str) -> str:
@@ -240,7 +258,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Set up private weekly GitHub backups for the fridge monitor."
     )
-    parser.add_argument("--github-repo", default=DEFAULT_GITHUB_REPOSITORY)
+    parser.add_argument(
+        "--github-repo",
+        help="Private owner/repository destination (default: <authenticated-user>/home-app-backups)",
+    )
     parser.add_argument(
         "--backup-repo", type=Path, default=DEFAULT_BACKUP_REPOSITORY
     )
@@ -257,7 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         datetime.strptime(args.time, "%H:%M")
         gh = find_github_cli(args.gh)
-        remote = ensure_private_github_repository(gh, args.github_repo)
+        repository_name = args.github_repo or default_github_repository(gh)
+        remote = ensure_private_github_repository(gh, repository_name)
         initialize_local_repository(args.backup_repo.resolve(), remote)
 
         backup_script = Path(__file__).with_name("backup_database.py")

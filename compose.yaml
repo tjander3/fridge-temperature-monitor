@@ -7,6 +7,7 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - monitor-data:/data
+      - ${SENSORS_FILE:-./dashboard/sensors.example.json}:/app/sensors.json:ro
     environment:
       ADMIN_API_TOKEN: "${ADMIN_API_TOKEN:-}"
     restart: unless-stopped
@@ -39,6 +40,7 @@ services:
       NOTIFY_EMAIL_TO: "${NOTIFY_EMAIL_TO:-}"
     volumes:
       - monitor-data:/data
+      - ${SENSORS_FILE:-./dashboard/sensors.example.json}:/app/sensors.json:ro
     depends_on:
       dashboard:
         condition: service_healthy
