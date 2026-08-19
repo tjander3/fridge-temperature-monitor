@@ -37,10 +37,6 @@ services:
       SMTP_APP_PASSWORD: "${SMTP_APP_PASSWORD:-}"
       NOTIFY_EMAIL_FROM: "${NOTIFY_EMAIL_FROM:-}"
       NOTIFY_EMAIL_TO: "${NOTIFY_EMAIL_TO:-}"
-      NTFY_ENABLED: "${NTFY_ENABLED:-false}"
-      NTFY_URL: "${NTFY_URL:-https://ntfy.sh}"
-      NTFY_TOPIC: "${NTFY_TOPIC:-}"
-      NTFY_TOKEN: "${NTFY_TOKEN:-}"
     volumes:
       - monitor-data:/data
     depends_on:

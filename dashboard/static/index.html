@@ -143,7 +143,7 @@
       <div class="settings-heading">
         <div>
           <h2>Notification settings</h2>
-          <p>Administrator access is required. Mail credentials and the private ntfy topic remain outside this page.</p>
+          <p>Administrator access is required. Mail credentials remain outside this page.</p>
         </div>
         <button type="button" id="settings-close" aria-label="Close settings">Close</button>
       </div>
@@ -157,20 +157,9 @@
         </label>
       </section>
 
-      <section class="settings-section">
-        <h3>Phone</h3>
-        <label class="settings-check"><input type="checkbox" id="ntfy-enabled"> Send ntfy phone push</label>
-        <p class="settings-help">The private ntfy topic is configured in the ignored <code>.env</code> file.</p>
-        <label class="settings-check"><input type="checkbox" id="vtext-enabled"> Also try Verizon Vtext email-to-text</label>
-        <label class="settings-field">Verizon phone number
-          <input type="tel" id="phone-number" inputmode="tel" placeholder="555-555-5555" autocomplete="tel">
-        </label>
-        <p class="settings-help">Vtext is a best-effort fallback that Verizon plans to retire by March 31, 2027. Keep ntfy enabled.</p>
-      </section>
-
       <div class="settings-actions">
         <button class="primary" type="submit">Save settings</button>
-        <button type="button" id="send-test">Send test notification</button>
+        <button type="button" id="send-test">Send test email</button>
         <button type="button" id="admin-lock">Lock admin settings</button>
       </div>
       <div class="settings-status" id="settings-status" aria-live="polite"></div>
@@ -223,9 +212,6 @@
     function renderNotificationSettings(settings) {
       document.getElementById("email-enabled").checked = settings.email_enabled;
       document.getElementById("email-to").value = settings.email_to || "";
-      document.getElementById("ntfy-enabled").checked = settings.ntfy_enabled;
-      document.getElementById("vtext-enabled").checked = settings.vtext_enabled;
-      document.getElementById("phone-number").value = settings.phone_number || "";
       const runtime = settings.runtime;
       document.getElementById("notifier-runtime").textContent = runtime
         ? `Notifier ${runtime.healthy ? "healthy" : "needs attention"}: ${runtime.detail}`
@@ -268,10 +254,7 @@
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
             email_enabled: document.getElementById("email-enabled").checked,
-            email_to: document.getElementById("email-to").value,
-            ntfy_enabled: document.getElementById("ntfy-enabled").checked,
-            vtext_enabled: document.getElementById("vtext-enabled").checked,
-            phone_number: document.getElementById("phone-number").value
+            email_to: document.getElementById("email-to").value
           })
         });
         renderNotificationSettings(settings);

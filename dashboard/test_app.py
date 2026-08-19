@@ -266,15 +266,12 @@ class DashboardApiTests(unittest.TestCase):
             {
                 "email_enabled": True,
                 "email_to": "owner@example.com",
-                "ntfy_enabled": True,
-                "vtext_enabled": True,
-                "phone_number": "+1 (555) 555-1212",
             },
         )
         self.assertEqual(status, 200)
         self.assertEqual(settings["email_to"], "owner@example.com")
-        self.assertEqual(settings["phone_number"], "5555551212")
-        self.assertTrue(settings["vtext_enabled"])
+        self.assertNotIn("phone_number", settings)
+        self.assertNotIn("ntfy_enabled", settings)
 
         status, result = self.admin_request(
             "POST", "/api/admin/notifications/test"
@@ -284,7 +281,7 @@ class DashboardApiTests(unittest.TestCase):
         _, refreshed = self.admin_request("GET", "/api/admin/notifications")
         self.assertEqual(refreshed["latest_test"]["status"], "pending")
 
-    def test_admin_settings_validate_email_and_phone(self):
+    def test_admin_settings_validate_email(self):
         with self.assertRaises(HTTPError) as context:
             self.admin_request(
                 "PUT",
@@ -292,9 +289,6 @@ class DashboardApiTests(unittest.TestCase):
                 {
                     "email_enabled": True,
                     "email_to": "not-an-email",
-                    "ntfy_enabled": False,
-                    "vtext_enabled": True,
-                    "phone_number": "123",
                 },
             )
         error = context.exception

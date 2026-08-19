@@ -1,7 +1,7 @@
 # Notification setup
 
 The `notifier` Docker service reads current sensor data and alert settings from
-the shared SQLite volume. It supports regular SMTP email and ntfy phone push.
+the shared SQLite volume and sends SMTP email.
 Alert state and every successful or failed delivery are also stored in SQLite,
 so container rebuilds do not resend old alerts.
 
@@ -26,7 +26,7 @@ Copy-Item .env.example .env
 ```
 
 Compose automatically reads `.env`. The real file is excluded by `.gitignore`;
-never commit it or paste its app password or private ntfy topic into an issue.
+never commit it or paste its app password into an issue.
 Generate a long random `ADMIN_API_TOKEN` value as well; the hidden settings page
 requires it and the repository's `.env.example` includes the placeholder.
 
@@ -55,25 +55,6 @@ Separate multiple recipients with commas. Do not use the normal Google account
 password. Google documents port 587 with TLS and app-password authentication
 for SMTP clients.
 
-## Phone push through ntfy
-
-1. Install the ntfy app on the phone.
-2. Choose a long random topic; on the public `ntfy.sh` service, possession of
-   the topic name grants access unless account authentication is configured.
-3. Subscribe to exactly that topic in the phone app.
-4. Set these values in `.env`:
-
-```text
-NTFY_ENABLED=true
-NTFY_URL=https://ntfy.sh
-NTFY_TOPIC=your-long-random-topic
-NTFY_TOKEN=
-```
-
-For an authenticated or self-hosted server, set `NTFY_TOKEN`. The notifier
-publishes urgent alerts with priority 5 and recovery messages with priority 3.
-Tapping a notification opens `NOTIFY_DASHBOARD_URL` when it is configured.
-
 ## Administrator settings page
 
 The normal dashboard does not show notification administration. Open the
@@ -91,25 +72,11 @@ request; hiding the button is only a convenience, not the security boundary.
 The page can:
 
 - enable or disable SMTP email and set one or more recipients;
-- enable or disable ntfy phone push;
-- optionally add a 10-digit Verizon number as a best-effort Vtext recipient;
 - display notifier health and the latest test result;
-- queue a clearly labeled test through the notifier service.
+- queue a clearly labeled test email through the notifier service.
 
-SMTP credentials and the private ntfy topic cannot be viewed or changed from
-the page. They stay in `.env`, which prevents a stolen admin token from exposing
-the mail app password or ntfy topic.
-
-## Why Verizon Vtext is not the primary phone channel
-
-Email sent to `10-digit-number@vtext.com` can still work for some Verizon
-customers, and that address may be added to `NOTIFY_EMAIL_TO` for best-effort
-delivery. It must not be the only alarm channel: Verizon says Vtext/VZPix is
-being shut down by March 31, 2027 and warns that individual senders may lose
-access earlier or already be filtered. ntfy is therefore the supported phone
-path for this project.
-
-Verizon notice: <https://www.verizon.com/support/vtext-vzwpix-shutdown/>
+SMTP credentials cannot be viewed or changed from the page. They stay in
+`.env`, which prevents a stolen admin token from exposing the mail app password.
 
 ## Start and test
 
@@ -132,13 +99,12 @@ Sending a test is deliberately opt-in and is clearly labeled `TEST`:
 wsl -d Ubuntu-Docker --cd $PWD -- docker compose exec -T notifier python notifier.py --test
 ```
 
-The administrator page's **Send test notification** button queues the same kind
-of test without giving the dashboard container access to delivery credentials.
+The administrator page's **Send test email** button queues the same kind of
+test without giving the dashboard container access to delivery credentials.
 
-If both channels are enabled, that command must succeed through both. Failed
-attempts are logged in the `notification_deliveries` SQLite table with a short
-error message. Run `scripts/test-system.ps1` afterward to verify notifier
-health alongside USB, radio, dashboard, and live sensor checks.
+Failed attempts are logged in the `notification_deliveries` SQLite table with
+a short error message. Run `scripts/test-system.ps1` afterward to verify
+notifier health alongside USB, radio, dashboard, and live sensor checks.
 
 ## Reliability limitation
 

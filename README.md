@@ -14,7 +14,7 @@ Current follow-up work is tracked in [TODO.md](TODO.md).
 - stores deduplicated readings in SQLite;
 - displays current temperature, battery state, last contact, and history charts;
 - detects stale, warm, cold, and low-battery states;
-- sends persistent, duplicate-suppressed alerts through SMTP email and optional ntfy phone push;
+- sends persistent, duplicate-suppressed alerts through SMTP email;
 - lets users select persistent food, freezer, beverage, wine, custom, or readings-only alert profiles from the dashboard;
 - can expose the dashboard to the same private LAN through a restricted Windows firewall rule;
 - includes fast CI tests, full-history secret scanning, and a separate live hardware/system test suite;
@@ -53,7 +53,7 @@ RTL-SDR USB
 Docker: rtl_433 -> JSON over private UDP -> dashboard + SQLite
                                                  |       |
                                                  |       v
-                                                 |   notifier -> email + ntfy
+                                                 |   notifier -> email
                                                  v
                                   named volume + localhost:8080
 ```
@@ -243,9 +243,9 @@ The database is not committed to Git. Back up the `fridge-temperature-monitor-da
 
 ## Notifications
 
-The Dockerized notifier supports SMTP email and optional ntfy phone push. It waits for two distinct bad readings before temperature or low-battery alerts, suppresses duplicates, sends timed reminders, persists state in SQLite, and sends recovery notifications. A stale sensor alerts after its configured timeout.
+The Dockerized notifier sends SMTP email. It waits for two distinct bad readings before temperature or low-battery alerts, suppresses duplicates, sends timed reminders, persists state in SQLite, and sends recovery notifications. A stale sensor alerts after its configured timeout.
 
-Copy `.env.example` to the ignored `.env` file and enable one or both channels. Gmail requires a 16-character app password rather than the account password. Run an explicit test only after configuration:
+Copy `.env.example` to the ignored `.env` file and configure email. Gmail requires a 16-character app password rather than the account password. Run an explicit test only after configuration:
 
 ```powershell
 wsl -d Ubuntu-Docker --cd $PWD -- docker compose exec -T notifier python notifier.py --test
@@ -254,10 +254,10 @@ wsl -d Ubuntu-Docker --cd $PWD -- docker compose exec -T notifier python notifie
 An administrator can also manage recipients and send tests from the hidden
 `?admin=1` dashboard route. The page prompts for `ADMIN_API_TOKEN`, keeps it in
 the current browser tab only, and the server enforces it on every settings or
-test request. SMTP credentials and the private ntfy topic remain in `.env` and
-are never returned to the browser.
+test request. SMTP credentials remain in `.env` and are never returned to the
+browser.
 
-See [the notification guide](docs/notifications.md) for complete setup, alert timing, security, Verizon Vtext retirement information, troubleshooting, and test commands.
+See [the notification guide](docs/notifications.md) for complete setup, alert timing, security, troubleshooting, and test commands.
 
 ## Power strategy
 

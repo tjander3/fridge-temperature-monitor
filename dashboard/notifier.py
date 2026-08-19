@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 from app import DATABASE_PATH, ReadingStore, iso_utc, load_sensors, utc_now
 
@@ -43,8 +42,6 @@ class AlertEvent:
     event: str
     title: str
     body: str
-    priority: int
-    tags: tuple[str, ...]
 
 
 @dataclass
@@ -59,10 +56,6 @@ class NotifierConfig:
     smtp_app_password: str
     email_from: str
     email_to: tuple[str, ...]
-    ntfy_enabled: bool
-    ntfy_url: str
-    ntfy_topic: str
-    ntfy_token: str
 
     @classmethod
     def from_env(cls):
@@ -83,25 +76,18 @@ class NotifierConfig:
             smtp_app_password=os.environ.get("SMTP_APP_PASSWORD", ""),
             email_from=os.environ.get("NOTIFY_EMAIL_FROM", "").strip() or username,
             email_to=recipients,
-            ntfy_enabled=env_bool("NTFY_ENABLED"),
-            ntfy_url=os.environ.get("NTFY_URL", "https://ntfy.sh").strip(),
-            ntfy_topic=os.environ.get("NTFY_TOPIC", "").strip(),
-            ntfy_token=os.environ.get("NTFY_TOKEN", "").strip(),
         )
 
     def errors(self, settings=None):
         settings = settings or {}
         email_enabled = settings.get("email_enabled", self.email_enabled)
-        vtext_enabled = settings.get("vtext_enabled", False)
         email_to = tuple(
             item.strip()
             for item in settings.get("email_to", ",".join(self.email_to)).split(",")
             if item.strip()
         )
-        phone_number = settings.get("phone_number", "")
-        ntfy_enabled = settings.get("ntfy_enabled", self.ntfy_enabled)
         errors = []
-        if email_enabled or vtext_enabled:
+        if email_enabled:
             missing = [
                 name
                 for name, value in (
@@ -109,7 +95,7 @@ class NotifierConfig:
                     ("SMTP_USERNAME", self.smtp_username),
                     ("SMTP_APP_PASSWORD", self.smtp_app_password),
                     ("NOTIFY_EMAIL_FROM", self.email_from),
-                    ("NOTIFY_EMAIL_TO", email_to or (phone_number if vtext_enabled else "")),
+                    ("NOTIFY_EMAIL_TO", email_to),
                 )
                 if not value
             ]
@@ -117,19 +103,6 @@ class NotifierConfig:
                 errors.append("email enabled but missing " + ", ".join(missing))
             if self.smtp_security not in {"starttls", "ssl", "none"}:
                 errors.append("SMTP_SECURITY must be starttls, ssl, or none")
-        if ntfy_enabled:
-            missing = [
-                name
-                for name, value in (
-                    ("NTFY_URL", self.ntfy_url),
-                    ("NTFY_TOPIC", self.ntfy_topic),
-                )
-                if not value
-            ]
-            if missing:
-                errors.append("ntfy enabled but missing " + ", ".join(missing))
-            if self.ntfy_url and not self.ntfy_url.startswith("https://"):
-                errors.append("NTFY_URL must use HTTPS")
         return errors
 
 
@@ -167,36 +140,6 @@ class SmtpChannel:
                     self.config.smtp_username, self.config.smtp_app_password
                 )
             server.send_message(message)
-
-
-class NtfyChannel:
-    name = "ntfy"
-
-    def __init__(self, config):
-        self.config = config
-
-    def send(self, alert):
-        payload = {
-            "topic": self.config.ntfy_topic,
-            "title": alert.title,
-            "message": alert.body,
-            "priority": alert.priority,
-            "tags": list(alert.tags),
-        }
-        if self.config.dashboard_url:
-            payload["click"] = self.config.dashboard_url
-        headers = {"Content-Type": "application/json"}
-        if self.config.ntfy_token:
-            headers["Authorization"] = f"Bearer {self.config.ntfy_token}"
-        request = Request(
-            self.config.ntfy_url.rstrip("/") + "/",
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        with urlopen(request, timeout=20) as response:
-            if not 200 <= response.status < 300:
-                raise RuntimeError(f"ntfy returned HTTP {response.status}")
 
 
 class AlertEngine:
@@ -263,14 +206,21 @@ class AlertEngine:
                 INSERT OR IGNORE INTO notification_settings (
                     id, email_enabled, email_to, ntfy_enabled,
                     vtext_enabled, phone_number, updated_at
-                ) VALUES (1, ?, ?, ?, 0, '', ?)
+                ) VALUES (1, ?, ?, 0, 0, '', ?)
                 """,
                 (
                     int(config.email_enabled),
                     ",".join(config.email_to),
-                    int(config.ntfy_enabled),
                     iso_utc(utc_now()),
                 ),
+            )
+            # Retired phone fields remain only for compatibility with old volumes.
+            connection.execute(
+                """
+                UPDATE notification_settings
+                SET ntfy_enabled = 0, vtext_enabled = 0, phone_number = ''
+                WHERE id = 1
+                """
             )
             connection.execute(
                 """
@@ -290,9 +240,6 @@ class AlertEngine:
         return {
             "email_enabled": bool(row["email_enabled"]),
             "email_to": row["email_to"],
-            "ntfy_enabled": bool(row["ntfy_enabled"]),
-            "vtext_enabled": bool(row["vtext_enabled"]),
-            "phone_number": row["phone_number"],
         }
 
     def write_runtime(self, healthy, detail, channels):
@@ -551,10 +498,6 @@ class AlertEngine:
             event=event_name,
             title=title,
             body=" ".join(details),
-            priority=3 if event_name == "recovery" else 5,
-            tags=("heavy_check_mark",)
-            if event_name == "recovery"
-            else ("warning", "thermometer"),
         )
 
     def mark_sent(self, alert, sent_at=None):
@@ -645,19 +588,13 @@ def configured_channels(config, settings=None):
     settings = settings or {}
     channels = []
     email_enabled = settings.get("email_enabled", config.email_enabled)
-    vtext_enabled = settings.get("vtext_enabled", False)
     recipients = [
         item.strip()
         for item in settings.get("email_to", ",".join(config.email_to)).split(",")
         if item.strip()
     ]
-    phone_number = settings.get("phone_number", "")
-    if vtext_enabled and phone_number:
-        recipients.append(f"{phone_number}@vtext.com")
-    if email_enabled or vtext_enabled:
+    if email_enabled:
         channels.append(SmtpChannel(config, recipients))
-    if settings.get("ntfy_enabled", config.ntfy_enabled):
-        channels.append(NtfyChannel(config))
     return channels
 
 
@@ -693,11 +630,9 @@ def test_alert(config):
         sensor_name="Test",
         kind="test",
         event="test",
-        title="TEST: Cold Storage Monitor notifications",
+        title="TEST: Cold Storage Monitor email",
         body="This is an opt-in test. No temperature problem was detected."
         + (f" Dashboard: {config.dashboard_url}" if config.dashboard_url else ""),
-        priority=3,
-        tags=("test_tube",),
     )
 
 

@@ -158,6 +158,14 @@ class ReadingStore:
                 )
                 """
             )
+            # Retain retired phone columns so existing installations can upgrade
+            # without rebuilding the settings table, but erase their old values.
+            connection.execute(
+                """
+                UPDATE notification_settings
+                SET ntfy_enabled = 0, vtext_enabled = 0, phone_number = ''
+                """
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS notification_commands (
@@ -288,9 +296,6 @@ class ReadingStore:
         settings = {
             "email_enabled": False,
             "email_to": "",
-            "ntfy_enabled": False,
-            "vtext_enabled": False,
-            "phone_number": "",
             "updated_at": None,
         }
         if row:
@@ -298,9 +303,6 @@ class ReadingStore:
                 {
                     "email_enabled": bool(row["email_enabled"]),
                     "email_to": row["email_to"],
-                    "ntfy_enabled": bool(row["ntfy_enabled"]),
-                    "vtext_enabled": bool(row["vtext_enabled"]),
-                    "phone_number": row["phone_number"],
                     "updated_at": row["updated_at"],
                 }
             )
@@ -319,8 +321,6 @@ class ReadingStore:
 
     def update_notification_settings(self, payload):
         email_enabled = payload.get("email_enabled") is True
-        ntfy_enabled = payload.get("ntfy_enabled") is True
-        vtext_enabled = payload.get("vtext_enabled") is True
         email_to = str(payload.get("email_to") or "").strip()
         recipients = [item.strip() for item in email_to.split(",") if item.strip()]
         invalid_recipients = [
@@ -330,16 +330,8 @@ class ReadingStore:
         ]
         if invalid_recipients:
             raise ValueError("enter valid comma-separated email addresses")
-        if email_enabled and not recipients and not vtext_enabled:
-            raise ValueError("email alerts require a recipient or Verizon fallback")
-
-        phone_number = re.sub(r"\D", "", str(payload.get("phone_number") or ""))
-        if phone_number.startswith("1") and len(phone_number) == 11:
-            phone_number = phone_number[1:]
-        if phone_number and len(phone_number) != 10:
-            raise ValueError("Verizon phone number must contain 10 digits")
-        if vtext_enabled and not phone_number:
-            raise ValueError("Verizon fallback requires a phone number")
+        if email_enabled and not recipients:
+            raise ValueError("email alerts require a recipient")
 
         with self.lock, self._connection() as connection:
             connection.execute(
@@ -359,9 +351,9 @@ class ReadingStore:
                 (
                     int(email_enabled),
                     ",".join(recipients),
-                    int(ntfy_enabled),
-                    int(vtext_enabled),
-                    phone_number,
+                    0,
+                    0,
+                    "",
                     iso_utc(utc_now()),
                 ),
             )

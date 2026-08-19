@@ -5,7 +5,7 @@ import unittest
 from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import app
 import notifier
@@ -35,10 +35,6 @@ def configuration(**overrides):
         "smtp_app_password": "secret",
         "email_from": "sender@example.com",
         "email_to": ("owner@example.com",),
-        "ntfy_enabled": False,
-        "ntfy_url": "https://ntfy.example.com",
-        "ntfy_topic": "private-topic",
-        "ntfy_token": "",
     }
     values.update(overrides)
     return notifier.NotifierConfig(**values)
@@ -180,28 +176,22 @@ class AlertEngineTests(unittest.TestCase):
         self.assertIsNotNone(last_sent)
 
     def test_web_settings_reload_and_test_command_state_are_persistent(self):
-        config = configuration(email_enabled=True, ntfy_enabled=True)
+        config = configuration(email_enabled=True)
         self.engine.seed_notification_settings(config)
         self.engine.store.update_notification_settings(
             {
                 "email_enabled": True,
                 "email_to": "owner@example.com",
-                "ntfy_enabled": True,
-                "vtext_enabled": True,
-                "phone_number": "5555551212",
             }
         )
         settings = self.engine.delivery_settings()
         channels = notifier.configured_channels(config, settings)
-        self.assertEqual([channel.name for channel in channels], ["email", "ntfy"])
-        self.assertEqual(
-            channels[0].recipients,
-            ("owner@example.com", "5555551212@vtext.com"),
-        )
+        self.assertEqual([channel.name for channel in channels], ["email"])
+        self.assertEqual(channels[0].recipients, ("owner@example.com",))
 
         command_id = self.engine.store.queue_notification_test()
         self.assertEqual(self.engine.claim_test_commands(), [command_id])
-        self.engine.complete_test_command(command_id, True, "Sent through email, ntfy")
+        self.engine.complete_test_command(command_id, True, "Sent through email")
         latest = self.engine.store.notification_settings()["latest_test"]
         self.assertEqual(latest["status"], "sent")
 
@@ -211,7 +201,7 @@ class ChannelTests(unittest.TestCase):
     def test_smtp_uses_starttls_login_and_expected_message(self, smtp):
         client = smtp.return_value
         alert = notifier.AlertEvent(
-            1, "Freezer", "too_warm", "alert", "Freezer: too warm", "Body", 5, ("warning",)
+            1, "Freezer", "too_warm", "alert", "Freezer: too warm", "Body"
         )
         notifier.SmtpChannel(configuration(email_enabled=True)).send(alert)
         client.starttls.assert_called_once()
@@ -220,29 +210,12 @@ class ChannelTests(unittest.TestCase):
         self.assertEqual(message["To"], "owner@example.com")
         self.assertIn("Freezer: too warm", message["Subject"])
 
-    @patch("notifier.urlopen")
-    def test_ntfy_publishes_json_with_click_target(self, mocked_urlopen):
-        response = MagicMock(status=200)
-        mocked_urlopen.return_value.__enter__.return_value = response
-        alert = notifier.AlertEvent(
-            1, "Freezer", "too_warm", "alert", "Freezer: too warm", "Body", 5, ("warning",)
-        )
-        notifier.NtfyChannel(configuration(ntfy_enabled=True)).send(alert)
-        request = mocked_urlopen.call_args.args[0]
-        payload = json.loads(request.data)
-        self.assertEqual(payload["topic"], "private-topic")
-        self.assertEqual(payload["priority"], 5)
-        self.assertEqual(payload["click"], "http://monitor.test")
-
     def test_enabled_channels_require_credentials(self):
         config = configuration(
             email_enabled=True,
             smtp_app_password="",
-            ntfy_enabled=True,
-            ntfy_topic="",
         )
         self.assertIn("SMTP_APP_PASSWORD", "; ".join(config.errors()))
-        self.assertIn("NTFY_TOPIC", "; ".join(config.errors()))
 
     def test_healthcheck_rejects_stale_or_unhealthy_state(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -20,10 +20,8 @@
 
 - [x] Implement the Dockerized notifier described in `docs/notifications.md`.
 - [x] Add SMTP email delivery using credentials stored outside Git.
-- [x] Add optional ntfy phone push.
 - [x] Add alert persistence, duplicate suppression, reminders, and recovery messages.
 - [x] Add mocked notification tests and an opt-in live test notification.
-- [ ] Consider Twilio only if true SMS is still preferable after trying phone push.
 - [ ] Add an external heartbeat so a sleeping or offline monitoring computer can be detected.
 
 ## Dashboard
