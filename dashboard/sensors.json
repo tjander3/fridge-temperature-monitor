@@ -6,7 +6,7 @@
     "monitoring": true,
     "minimum_f": 34,
     "maximum_f": 45,
-    "stale_minutes": 10,
+    "stale_minutes": 120,
     "color": "#37c9d9"
   },
   "52572": {
@@ -16,7 +16,7 @@
     "monitoring": true,
     "minimum_f": -20,
     "maximum_f": 0,
-    "stale_minutes": 10,
+    "stale_minutes": 120,
     "color": "#ffb84d"
   }
 }

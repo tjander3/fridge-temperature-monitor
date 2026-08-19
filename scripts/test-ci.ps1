@@ -23,12 +23,14 @@ try {
     }
 
     Write-Host "[2/5] Compiling Python"
-    & python -m py_compile dashboard/app.py dashboard/notifier.py dashboard/test_app.py dashboard/test_notifier.py
+    & python -m py_compile dashboard/app.py dashboard/notifier.py dashboard/test_app.py dashboard/test_notifier.py scripts/sqlite_dump.py scripts/backup_database.py scripts/restore_database.py scripts/setup_backups.py scripts/test_backups.py
     if ($LASTEXITCODE -ne 0) { throw "Python compilation failed." }
 
     Write-Host "[3/5] Running dashboard unit tests"
     & python -m unittest discover -s dashboard -p "test_*.py" -v
     if ($LASTEXITCODE -ne 0) { throw "Python unit tests failed." }
+    & python -m unittest discover -s scripts -p "test_*.py" -v
+    if ($LASTEXITCODE -ne 0) { throw "Backup unit tests failed." }
 
     Write-Host "[4/5] Checking dashboard JavaScript syntax"
     $html = Get-Content -Raw -LiteralPath "dashboard/static/index.html"

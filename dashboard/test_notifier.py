@@ -18,7 +18,7 @@ SENSORS = {
         "monitoring": True,
         "minimum_f": 34,
         "maximum_f": 45,
-        "stale_minutes": 10,
+        "stale_minutes": 120,
     }
 }
 
@@ -114,7 +114,7 @@ class AlertEngineTests(unittest.TestCase):
         self.assertFalse(self.events_of_kind(events, "too_warm"))
 
     def test_stale_alert_and_next_reading_recovery(self):
-        self.engine.store.add_event(self.reading(42, minutes=-20))
+        self.engine.store.add_event(self.reading(42, minutes=-130))
         alerts = self.events_of_kind(self.engine.evaluate(self.base), "stale")
         self.assertEqual([event.event for event in alerts], ["alert"])
         self.engine.mark_sent(alerts[0], self.base)
