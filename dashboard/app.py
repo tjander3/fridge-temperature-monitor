@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import secrets
 import signal
 import socketserver
 import sqlite3
@@ -17,6 +19,7 @@ DATABASE_PATH = Path(os.environ.get("DATABASE_PATH", "/data/fridge-monitor.db"))
 SENSORS_PATH = Path(os.environ.get("SENSORS_PATH", APP_DIR / "sensors.json"))
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
 SYSLOG_PORT = int(os.environ.get("SYSLOG_PORT", "1514"))
+ADMIN_API_TOKEN = os.environ.get("ADMIN_API_TOKEN", "").strip()
 
 STORAGE_PROFILES = {
     "food_refrigerator": {
@@ -142,6 +145,42 @@ class ReadingStore:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notification_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    email_enabled INTEGER NOT NULL,
+                    email_to TEXT NOT NULL,
+                    ntfy_enabled INTEGER NOT NULL,
+                    vtext_enabled INTEGER NOT NULL,
+                    phone_number TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notification_commands (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    command TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    result TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notifier_runtime (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    healthy INTEGER NOT NULL,
+                    detail TEXT NOT NULL,
+                    channels_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def add_event(self, event):
         if event.get("model") != "Acurite-986":
@@ -227,6 +266,126 @@ class ReadingStore:
                     iso_utc(utc_now()),
                 ),
             )
+
+    def notification_settings(self):
+        with self.lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM notification_settings WHERE id = 1"
+            ).fetchone()
+            runtime = connection.execute(
+                "SELECT * FROM notifier_runtime WHERE id = 1"
+            ).fetchone()
+            latest_test = connection.execute(
+                """
+                SELECT id, status, created_at, completed_at, result
+                FROM notification_commands
+                WHERE command = 'test'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        settings = {
+            "email_enabled": False,
+            "email_to": "",
+            "ntfy_enabled": False,
+            "vtext_enabled": False,
+            "phone_number": "",
+            "updated_at": None,
+        }
+        if row:
+            settings.update(
+                {
+                    "email_enabled": bool(row["email_enabled"]),
+                    "email_to": row["email_to"],
+                    "ntfy_enabled": bool(row["ntfy_enabled"]),
+                    "vtext_enabled": bool(row["vtext_enabled"]),
+                    "phone_number": row["phone_number"],
+                    "updated_at": row["updated_at"],
+                }
+            )
+        settings["runtime"] = (
+            {
+                "healthy": bool(runtime["healthy"]),
+                "detail": runtime["detail"],
+                "channels": json.loads(runtime["channels_json"]),
+                "updated_at": runtime["updated_at"],
+            }
+            if runtime
+            else None
+        )
+        settings["latest_test"] = dict(latest_test) if latest_test else None
+        return settings
+
+    def update_notification_settings(self, payload):
+        email_enabled = payload.get("email_enabled") is True
+        ntfy_enabled = payload.get("ntfy_enabled") is True
+        vtext_enabled = payload.get("vtext_enabled") is True
+        email_to = str(payload.get("email_to") or "").strip()
+        recipients = [item.strip() for item in email_to.split(",") if item.strip()]
+        invalid_recipients = [
+            item
+            for item in recipients
+            if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", item)
+        ]
+        if invalid_recipients:
+            raise ValueError("enter valid comma-separated email addresses")
+        if email_enabled and not recipients and not vtext_enabled:
+            raise ValueError("email alerts require a recipient or Verizon fallback")
+
+        phone_number = re.sub(r"\D", "", str(payload.get("phone_number") or ""))
+        if phone_number.startswith("1") and len(phone_number) == 11:
+            phone_number = phone_number[1:]
+        if phone_number and len(phone_number) != 10:
+            raise ValueError("Verizon phone number must contain 10 digits")
+        if vtext_enabled and not phone_number:
+            raise ValueError("Verizon fallback requires a phone number")
+
+        with self.lock, self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO notification_settings (
+                    id, email_enabled, email_to, ntfy_enabled,
+                    vtext_enabled, phone_number, updated_at
+                ) VALUES (1, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    email_enabled = excluded.email_enabled,
+                    email_to = excluded.email_to,
+                    ntfy_enabled = excluded.ntfy_enabled,
+                    vtext_enabled = excluded.vtext_enabled,
+                    phone_number = excluded.phone_number,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    int(email_enabled),
+                    ",".join(recipients),
+                    int(ntfy_enabled),
+                    int(vtext_enabled),
+                    phone_number,
+                    iso_utc(utc_now()),
+                ),
+            )
+        return self.notification_settings()
+
+    def queue_notification_test(self):
+        with self.lock, self._connection() as connection:
+            pending = connection.execute(
+                """
+                SELECT id FROM notification_commands
+                WHERE command = 'test' AND status IN ('pending', 'processing')
+                LIMIT 1
+                """
+            ).fetchone()
+            if pending:
+                return pending["id"]
+            cursor = connection.execute(
+                """
+                INSERT INTO notification_commands (command, status, created_at)
+                VALUES ('test', 'pending', ?)
+                """,
+                (iso_utc(utc_now()),),
+            )
+            return cursor.lastrowid
 
     def dashboard_data(self, hours=24):
         hours = max(1, min(int(hours), 24 * 365))
@@ -370,10 +529,24 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return
             self._send_json(self.store.dashboard_data(hours))
             return
+        if parsed.path == "/api/admin/notifications":
+            if not self._require_admin():
+                return
+            self._send_json(self.store.notification_settings())
+            return
         super().do_GET()
 
     def do_PUT(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/admin/notifications":
+            if not self._require_admin():
+                return
+            try:
+                payload = self._read_json()
+                self._send_json(self.store.update_notification_settings(payload))
+            except ValueError as error:
+                self._send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
         path_parts = parsed.path.strip("/").split("/")
         if len(path_parts) != 4 or path_parts[:2] != ["api", "sensors"] or path_parts[3] != "profile":
             self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
@@ -411,6 +584,43 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         sensor_id = int(path_parts[2])
         sensor = next(sensor for sensor in data["sensors"] if sensor["id"] == sensor_id)
         self._send_json({"sensor": sensor, "profiles": data["profiles"]})
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/admin/notifications/test":
+            self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+        if not self._require_admin():
+            return
+        command_id = self.store.queue_notification_test()
+        self._send_json(
+            {"status": "queued", "command_id": command_id}, HTTPStatus.ACCEPTED
+        )
+
+    def _read_json(self):
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as error:
+            raise ValueError("invalid request body") from error
+        if content_length <= 0 or content_length > 4096:
+            raise ValueError("invalid request body")
+        try:
+            payload = json.loads(self.rfile.read(content_length))
+        except json.JSONDecodeError as error:
+            raise ValueError("request body must be valid JSON") from error
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be a JSON object")
+        return payload
+
+    def _require_admin(self):
+        if not ADMIN_API_TOKEN:
+            self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return False
+        supplied = self.headers.get("X-Admin-Token", "")
+        if not secrets.compare_digest(supplied, ADMIN_API_TOKEN):
+            self._send_json({"error": "administrator token required"}, HTTPStatus.UNAUTHORIZED)
+            return False
+        return True
 
     def _send_json(self, value, status=HTTPStatus.OK):
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")

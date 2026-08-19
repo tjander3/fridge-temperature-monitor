@@ -179,6 +179,32 @@ class AlertEngineTests(unittest.TestCase):
         self.assertIn("delivery unavailable", deliveries[1][2])
         self.assertIsNotNone(last_sent)
 
+    def test_web_settings_reload_and_test_command_state_are_persistent(self):
+        config = configuration(email_enabled=True, ntfy_enabled=True)
+        self.engine.seed_notification_settings(config)
+        self.engine.store.update_notification_settings(
+            {
+                "email_enabled": True,
+                "email_to": "owner@example.com",
+                "ntfy_enabled": True,
+                "vtext_enabled": True,
+                "phone_number": "5555551212",
+            }
+        )
+        settings = self.engine.delivery_settings()
+        channels = notifier.configured_channels(config, settings)
+        self.assertEqual([channel.name for channel in channels], ["email", "ntfy"])
+        self.assertEqual(
+            channels[0].recipients,
+            ("owner@example.com", "5555551212@vtext.com"),
+        )
+
+        command_id = self.engine.store.queue_notification_test()
+        self.assertEqual(self.engine.claim_test_commands(), [command_id])
+        self.engine.complete_test_command(command_id, True, "Sent through email, ntfy")
+        latest = self.engine.store.notification_settings()["latest_test"]
+        self.assertEqual(latest["status"], "sent")
+
 
 class ChannelTests(unittest.TestCase):
     @patch("notifier.smtplib.SMTP")

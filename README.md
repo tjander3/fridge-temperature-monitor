@@ -251,6 +251,12 @@ Copy `.env.example` to the ignored `.env` file and enable one or both channels. 
 wsl -d Ubuntu-Docker --cd $PWD -- docker compose exec -T notifier python notifier.py --test
 ```
 
+An administrator can also manage recipients and send tests from the hidden
+`?admin=1` dashboard route. The page prompts for `ADMIN_API_TOKEN`, keeps it in
+the current browser tab only, and the server enforces it on every settings or
+test request. SMTP credentials and the private ntfy topic remain in `.env` and
+are never returned to the browser.
+
 See [the notification guide](docs/notifications.md) for complete setup, alert timing, security, Verizon Vtext retirement information, troubleshooting, and test commands.
 
 ## Power strategy

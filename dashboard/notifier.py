@@ -89,9 +89,19 @@ class NotifierConfig:
             ntfy_token=os.environ.get("NTFY_TOKEN", "").strip(),
         )
 
-    def errors(self):
+    def errors(self, settings=None):
+        settings = settings or {}
+        email_enabled = settings.get("email_enabled", self.email_enabled)
+        vtext_enabled = settings.get("vtext_enabled", False)
+        email_to = tuple(
+            item.strip()
+            for item in settings.get("email_to", ",".join(self.email_to)).split(",")
+            if item.strip()
+        )
+        phone_number = settings.get("phone_number", "")
+        ntfy_enabled = settings.get("ntfy_enabled", self.ntfy_enabled)
         errors = []
-        if self.email_enabled:
+        if email_enabled or vtext_enabled:
             missing = [
                 name
                 for name, value in (
@@ -99,7 +109,7 @@ class NotifierConfig:
                     ("SMTP_USERNAME", self.smtp_username),
                     ("SMTP_APP_PASSWORD", self.smtp_app_password),
                     ("NOTIFY_EMAIL_FROM", self.email_from),
-                    ("NOTIFY_EMAIL_TO", self.email_to),
+                    ("NOTIFY_EMAIL_TO", email_to or (phone_number if vtext_enabled else "")),
                 )
                 if not value
             ]
@@ -107,7 +117,7 @@ class NotifierConfig:
                 errors.append("email enabled but missing " + ", ".join(missing))
             if self.smtp_security not in {"starttls", "ssl", "none"}:
                 errors.append("SMTP_SECURITY must be starttls, ssl, or none")
-        if self.ntfy_enabled:
+        if ntfy_enabled:
             missing = [
                 name
                 for name, value in (
@@ -126,14 +136,15 @@ class NotifierConfig:
 class SmtpChannel:
     name = "email"
 
-    def __init__(self, config):
+    def __init__(self, config, recipients=None):
         self.config = config
+        self.recipients = tuple(recipients or config.email_to)
 
     def send(self, alert):
         message = EmailMessage()
         message["Subject"] = f"[Cold Storage] {alert.title}"
         message["From"] = self.config.email_from
-        message["To"] = ", ".join(self.config.email_to)
+        message["To"] = ", ".join(self.recipients)
         message.set_content(alert.body)
 
         context = ssl.create_default_context()
@@ -243,6 +254,99 @@ class AlertEngine:
                     error TEXT
                 )
                 """
+            )
+
+    def seed_notification_settings(self, config):
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO notification_settings (
+                    id, email_enabled, email_to, ntfy_enabled,
+                    vtext_enabled, phone_number, updated_at
+                ) VALUES (1, ?, ?, ?, 0, '', ?)
+                """,
+                (
+                    int(config.email_enabled),
+                    ",".join(config.email_to),
+                    int(config.ntfy_enabled),
+                    iso_utc(utc_now()),
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE notification_commands
+                SET status = 'pending', result = 'Recovered after notifier restart'
+                WHERE command = 'test' AND status = 'processing'
+                """
+            )
+
+    def delivery_settings(self):
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM notification_settings WHERE id = 1"
+            ).fetchone()
+        if not row:
+            return {}
+        return {
+            "email_enabled": bool(row["email_enabled"]),
+            "email_to": row["email_to"],
+            "ntfy_enabled": bool(row["ntfy_enabled"]),
+            "vtext_enabled": bool(row["vtext_enabled"]),
+            "phone_number": row["phone_number"],
+        }
+
+    def write_runtime(self, healthy, detail, channels):
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO notifier_runtime (
+                    id, healthy, detail, channels_json, updated_at
+                ) VALUES (1, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    healthy = excluded.healthy,
+                    detail = excluded.detail,
+                    channels_json = excluded.channels_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    int(healthy),
+                    detail,
+                    json.dumps(channels, separators=(",", ":")),
+                    iso_utc(utc_now()),
+                ),
+            )
+
+    def claim_test_commands(self):
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id FROM notification_commands
+                WHERE command = 'test' AND status = 'pending'
+                ORDER BY id
+                """
+            ).fetchall()
+            ids = [row["id"] for row in rows]
+            for command_id in ids:
+                connection.execute(
+                    "UPDATE notification_commands SET status = 'processing' WHERE id = ?",
+                    (command_id,),
+                )
+        return ids
+
+    def complete_test_command(self, command_id, success, result):
+        with self._connection() as connection:
+            connection.execute(
+                """
+                UPDATE notification_commands
+                SET status = ?, completed_at = ?, result = ?
+                WHERE id = ?
+                """,
+                (
+                    "sent" if success else "failed",
+                    iso_utc(utc_now()),
+                    result[:1000],
+                    command_id,
+                ),
             )
 
     def evaluate(self, now=None):
@@ -502,42 +606,57 @@ class NotificationService:
     def run_once(self, now=None):
         events = self.engine.evaluate(now)
         for alert in events:
-            delivered = False
-            for channel in self.channels:
-                try:
-                    channel.send(alert)
-                    self.engine.record_delivery(
-                        alert, channel.name, True, created_at=now
-                    )
-                    delivered = True
-                    print(
-                        f"notification: sent {alert.event} {alert.kind} "
-                        f"for sensor {alert.sensor_id} via {channel.name}",
-                        flush=True,
-                    )
-                except Exception as error:  # Delivery errors must not stop monitoring.
-                    self.engine.record_delivery(
-                        alert,
-                        channel.name,
-                        False,
-                        error=str(error)[:1000],
-                        created_at=now,
-                    )
-                    print(
-                        f"notification: {channel.name} failed for sensor "
-                        f"{alert.sensor_id}: {error}",
-                        flush=True,
-                    )
-            if delivered:
-                self.engine.mark_sent(alert, now)
+            self.deliver(alert, now)
         return events
 
+    def deliver(self, alert, now=None):
+        delivered = []
+        failures = []
+        for channel in self.channels:
+            try:
+                channel.send(alert)
+                self.engine.record_delivery(alert, channel.name, True, created_at=now)
+                delivered.append(channel.name)
+                print(
+                    f"notification: sent {alert.event} {alert.kind} "
+                    f"for sensor {alert.sensor_id} via {channel.name}",
+                    flush=True,
+                )
+            except Exception as error:  # Delivery errors must not stop monitoring.
+                self.engine.record_delivery(
+                    alert,
+                    channel.name,
+                    False,
+                    error=str(error)[:1000],
+                    created_at=now,
+                )
+                failures.append(f"{channel.name}: {error}")
+                print(
+                    f"notification: {channel.name} failed for sensor "
+                    f"{alert.sensor_id}: {error}",
+                    flush=True,
+                )
+        if delivered:
+            self.engine.mark_sent(alert, now)
+        return delivered, failures
 
-def configured_channels(config):
+
+def configured_channels(config, settings=None):
+    settings = settings or {}
     channels = []
-    if config.email_enabled:
-        channels.append(SmtpChannel(config))
-    if config.ntfy_enabled:
+    email_enabled = settings.get("email_enabled", config.email_enabled)
+    vtext_enabled = settings.get("vtext_enabled", False)
+    recipients = [
+        item.strip()
+        for item in settings.get("email_to", ",".join(config.email_to)).split(",")
+        if item.strip()
+    ]
+    phone_number = settings.get("phone_number", "")
+    if vtext_enabled and phone_number:
+        recipients.append(f"{phone_number}@vtext.com")
+    if email_enabled or vtext_enabled:
+        channels.append(SmtpChannel(config, recipients))
+    if settings.get("ntfy_enabled", config.ntfy_enabled):
         channels.append(NtfyChannel(config))
     return channels
 
@@ -568,14 +687,8 @@ def healthcheck(path=HEALTH_PATH):
         return 1
 
 
-def send_test(config, engine):
-    errors = config.errors()
-    channels = configured_channels(config)
-    if errors:
-        raise RuntimeError("; ".join(errors))
-    if not channels:
-        raise RuntimeError("enable at least one notification channel first")
-    alert = AlertEvent(
+def test_alert(config):
+    return AlertEvent(
         sensor_id=0,
         sensor_name="Test",
         kind="test",
@@ -586,6 +699,17 @@ def send_test(config, engine):
         priority=3,
         tags=("test_tube",),
     )
+
+
+def send_test(config, engine):
+    settings = engine.delivery_settings()
+    errors = config.errors(settings)
+    channels = configured_channels(config, settings)
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    if not channels:
+        raise RuntimeError("enable at least one notification channel first")
+    alert = test_alert(config)
     failures = []
     for channel in channels:
         try:
@@ -610,6 +734,7 @@ def main():
 
     config = NotifierConfig.from_env()
     engine = AlertEngine()
+    engine.seed_notification_settings(config)
     if args.test:
         send_test(config, engine)
         return
@@ -623,30 +748,47 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
-    errors = config.errors()
-    channel_names = [channel.name for channel in configured_channels(config)]
-    if errors:
-        detail = "; ".join(errors)
-        print(f"Notifier configuration error: {detail}", flush=True)
-        while not stopping:
-            write_health(False, detail, channel_names)
-            time.sleep(min(config.poll_seconds, 30))
-        return
-
-    service = NotificationService(engine, configured_channels(config))
-    detail = (
-        "notifications disabled"
-        if not channel_names
-        else "enabled: " + ", ".join(channel_names)
-    )
-    print(f"Notifier started ({detail})", flush=True)
+    print("Notifier started", flush=True)
     while not stopping:
+        settings = engine.delivery_settings()
+        errors = config.errors(settings)
+        channels = configured_channels(config, settings)
+        channel_names = [channel.name for channel in channels]
+        detail = (
+            "; ".join(errors)
+            if errors
+            else "notifications disabled"
+            if not channel_names
+            else "enabled: " + ", ".join(channel_names)
+        )
         try:
-            service.run_once()
-            write_health(True, detail, channel_names)
+            if errors:
+                print(f"Notifier configuration error: {detail}", flush=True)
+                write_health(False, detail, channel_names)
+                engine.write_runtime(False, detail, channel_names)
+            else:
+                service = NotificationService(engine, channels)
+                for command_id in engine.claim_test_commands():
+                    if not channels:
+                        engine.complete_test_command(
+                            command_id, False, "No notification channels are enabled"
+                        )
+                        continue
+                    delivered, failures = service.deliver(test_alert(config))
+                    success = bool(delivered) and not failures
+                    result = (
+                        "Sent through " + ", ".join(delivered)
+                        if success
+                        else "; ".join(failures) or "No delivery succeeded"
+                    )
+                    engine.complete_test_command(command_id, success, result)
+                service.run_once()
+                write_health(True, detail, channel_names)
+                engine.write_runtime(True, detail, channel_names)
         except Exception as error:  # Keep polling after transient database errors.
             print(f"Notifier poll failed: {error}", flush=True)
             write_health(False, str(error)[:1000], channel_names)
+            engine.write_runtime(False, str(error)[:1000], channel_names)
         deadline = time.monotonic() + config.poll_seconds
         while not stopping and time.monotonic() < deadline:
             time.sleep(min(1, deadline - time.monotonic()))

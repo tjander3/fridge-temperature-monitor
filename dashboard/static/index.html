@@ -33,6 +33,8 @@
     .subtitle, .updated { color: var(--muted); }
     header > div, .card, .chart-panel, .card-top > div { min-width: 0; }
     .updated { font-size: 13px; white-space: nowrap; }
+    .header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+    .admin-button { color: var(--cyan); }
     .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
     .card, .chart-panel { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(17,37,54,.96), rgba(10,25,37,.96)); border-radius: 18px; box-shadow: 0 22px 55px rgba(0,0,0,.22); }
     .card { padding: 22px; min-height: 300px; border-left: 4px solid var(--sensor-color, var(--line)); }
@@ -70,9 +72,26 @@
     .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; background: var(--series-color); }
     .empty { fill: var(--muted); font-size: 14px; text-anchor: middle; }
     footer { margin-top: 18px; color: var(--muted); font-size: 12px; text-align: center; }
+    dialog { width: min(560px, calc(100% - 24px)); max-height: calc(100vh - 32px); overflow: auto; border: 1px solid var(--line); border-radius: 18px; padding: 0; color: var(--text); background: var(--panel); box-shadow: 0 28px 90px rgba(0,0,0,.65); }
+    dialog::backdrop { background: rgba(2,8,13,.78); backdrop-filter: blur(3px); }
+    .settings-panel { padding: 24px; }
+    .settings-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+    .settings-heading h2 { margin: 0; font-size: 22px; }
+    .settings-heading p, .settings-help { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .settings-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .settings-section h3 { margin: 0 0 12px; font-size: 15px; }
+    .settings-field { display: grid; gap: 6px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+    .settings-check { display: flex; align-items: center; gap: 9px; color: var(--text); font-size: 14px; }
+    .settings-check input { width: auto; }
+    .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .settings-actions button.primary { color: #06131c; border-color: var(--cyan); background: var(--cyan); }
+    .settings-status { min-height: 20px; margin-top: 12px; color: var(--cyan); font-size: 13px; }
+    .settings-status.error { color: var(--red); }
+    .runtime-status { padding: 10px 12px; border-radius: 9px; color: var(--muted); background: rgba(142,166,184,.08); font-size: 12px; }
     @media (max-width: 700px) {
       main { width: min(100% - 20px, 1120px); padding-top: 28px; }
       header { align-items: stretch; flex-direction: column; }
+      .header-actions { justify-content: space-between; }
       header > div, .subtitle { width: 100%; max-width: 100%; }
       h1 { font-size: 28px; line-height: 1.1; }
       .cards { grid-template-columns: 1fr; }
@@ -94,7 +113,10 @@
         <h1>Cold Storage Monitor</h1>
         <div class="subtitle">Live temperatures from the basement freezer and mini fridge.</div>
       </div>
-      <div class="updated" id="updated">Waiting for data…</div>
+      <div class="header-actions">
+        <div class="updated" id="updated">Waiting for data…</div>
+        <button class="admin-button" id="admin-button" type="button" hidden>Settings</button>
+      </div>
     </header>
 
     <section class="cards" id="cards" aria-live="polite"></section>
@@ -116,6 +138,45 @@
     <footer>Data stays on this computer. Food presets follow FDA maximums; drinks and wine presets are quality preferences.</footer>
   </main>
 
+  <dialog id="settings-dialog">
+    <form class="settings-panel" method="dialog" id="settings-form">
+      <div class="settings-heading">
+        <div>
+          <h2>Notification settings</h2>
+          <p>Administrator access is required. Mail credentials and the private ntfy topic remain outside this page.</p>
+        </div>
+        <button type="button" id="settings-close" aria-label="Close settings">Close</button>
+      </div>
+      <div class="runtime-status" id="notifier-runtime">Loading notifier status…</div>
+
+      <section class="settings-section">
+        <h3>Email</h3>
+        <label class="settings-check"><input type="checkbox" id="email-enabled"> Send SMTP email alerts</label>
+        <label class="settings-field">Recipient email address(es)
+          <input type="text" id="email-to" inputmode="email" placeholder="you@example.com" autocomplete="email">
+        </label>
+      </section>
+
+      <section class="settings-section">
+        <h3>Phone</h3>
+        <label class="settings-check"><input type="checkbox" id="ntfy-enabled"> Send ntfy phone push</label>
+        <p class="settings-help">The private ntfy topic is configured in the ignored <code>.env</code> file.</p>
+        <label class="settings-check"><input type="checkbox" id="vtext-enabled"> Also try Verizon Vtext email-to-text</label>
+        <label class="settings-field">Verizon phone number
+          <input type="tel" id="phone-number" inputmode="tel" placeholder="555-555-5555" autocomplete="tel">
+        </label>
+        <p class="settings-help">Vtext is a best-effort fallback that Verizon plans to retire by March 31, 2027. Keep ntfy enabled.</p>
+      </section>
+
+      <div class="settings-actions">
+        <button class="primary" type="submit">Save settings</button>
+        <button type="button" id="send-test">Send test notification</button>
+        <button type="button" id="admin-lock">Lock admin settings</button>
+      </div>
+      <div class="settings-status" id="settings-status" aria-live="polite"></div>
+    </form>
+  </dialog>
+
   <script>
     const colors = ["#37c9d9", "#ffb84d", "#b58cff", "#52d39a"];
     const statusText = {
@@ -128,12 +189,110 @@
       too_cold: "Too cold"
     };
     let selectedHours = 24;
+    const adminMode = new URLSearchParams(window.location.search).get("admin") === "1";
+    const adminButton = document.getElementById("admin-button");
+    const settingsDialog = document.getElementById("settings-dialog");
+    const settingsStatus = document.getElementById("settings-status");
+    let adminToken = sessionStorage.getItem("fridge-admin-token") || "";
 
     function sensorColor(sensor, index) {
       return /^#[0-9a-f]{6}$/i.test(sensor.color || "")
         ? sensor.color
         : colors[index % colors.length];
     }
+
+    async function adminRequest(path, options = {}) {
+      if (!adminToken) {
+        adminToken = window.prompt("Enter the Cold Storage Monitor administrator token") || "";
+        if (!adminToken) throw new Error("Administrator token is required");
+        sessionStorage.setItem("fridge-admin-token", adminToken);
+      }
+      const response = await fetch(path, {
+        ...options,
+        headers: {"X-Admin-Token": adminToken, ...(options.headers || {})}
+      });
+      const result = await response.json();
+      if (response.status === 401) {
+        adminToken = "";
+        sessionStorage.removeItem("fridge-admin-token");
+      }
+      if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+      return result;
+    }
+
+    function renderNotificationSettings(settings) {
+      document.getElementById("email-enabled").checked = settings.email_enabled;
+      document.getElementById("email-to").value = settings.email_to || "";
+      document.getElementById("ntfy-enabled").checked = settings.ntfy_enabled;
+      document.getElementById("vtext-enabled").checked = settings.vtext_enabled;
+      document.getElementById("phone-number").value = settings.phone_number || "";
+      const runtime = settings.runtime;
+      document.getElementById("notifier-runtime").textContent = runtime
+        ? `Notifier ${runtime.healthy ? "healthy" : "needs attention"}: ${runtime.detail}`
+        : "Waiting for notifier status…";
+      if (settings.latest_test) {
+        settingsStatus.textContent = `Latest test: ${settings.latest_test.status}${settings.latest_test.result ? ` — ${settings.latest_test.result}` : ""}`;
+      }
+    }
+
+    async function loadNotificationSettings() {
+      settingsStatus.classList.remove("error");
+      settingsStatus.textContent = "Loading…";
+      const settings = await adminRequest("/api/admin/notifications");
+      renderNotificationSettings(settings);
+      return settings;
+    }
+
+    if (adminMode) adminButton.hidden = false;
+    adminButton.addEventListener("click", async () => {
+      try {
+        await loadNotificationSettings();
+        settingsDialog.showModal();
+      } catch (error) {
+        window.alert(error.message);
+      }
+    });
+    document.getElementById("settings-close").addEventListener("click", () => settingsDialog.close());
+    document.getElementById("admin-lock").addEventListener("click", () => {
+      adminToken = "";
+      sessionStorage.removeItem("fridge-admin-token");
+      settingsDialog.close();
+    });
+    document.getElementById("settings-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      settingsStatus.classList.remove("error");
+      settingsStatus.textContent = "Saving…";
+      try {
+        const settings = await adminRequest("/api/admin/notifications", {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            email_enabled: document.getElementById("email-enabled").checked,
+            email_to: document.getElementById("email-to").value,
+            ntfy_enabled: document.getElementById("ntfy-enabled").checked,
+            vtext_enabled: document.getElementById("vtext-enabled").checked,
+            phone_number: document.getElementById("phone-number").value
+          })
+        });
+        renderNotificationSettings(settings);
+        settingsStatus.textContent = "Settings saved. The notifier reloads them automatically.";
+      } catch (error) {
+        settingsStatus.classList.add("error");
+        settingsStatus.textContent = error.message;
+      }
+    });
+    document.getElementById("send-test").addEventListener("click", async () => {
+      settingsStatus.classList.remove("error");
+      settingsStatus.textContent = "Queuing test…";
+      try {
+        await adminRequest("/api/admin/notifications/test", {method: "POST"});
+        settingsStatus.textContent = "Test queued. Waiting for the notifier…";
+        window.setTimeout(() => loadNotificationSettings().catch(() => {}), 3500);
+      } catch (error) {
+        settingsStatus.classList.add("error");
+        settingsStatus.textContent = error.message;
+      }
+    });
 
     function formatSeen(value) {
       if (!value) return "No readings received";

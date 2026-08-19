@@ -29,6 +29,7 @@
 ## Dashboard
 
 - [x] Add persistent storage-profile presets and a custom alert range selector to each sensor card.
+- [x] Add an administrator-token-protected notification settings page and queued test-message button.
 
 ## Remote access
 

@@ -27,6 +27,8 @@ Copy-Item .env.example .env
 
 Compose automatically reads `.env`. The real file is excluded by `.gitignore`;
 never commit it or paste its app password or private ntfy topic into an issue.
+Generate a long random `ADMIN_API_TOKEN` value as well; the hidden settings page
+requires it and the repository's `.env.example` includes the placeholder.
 
 `NOTIFY_DASHBOARD_URL` is the link placed in messages. The LAN URL works while
 the phone is on home Wi-Fi. After private remote access is configured, replace
@@ -72,6 +74,32 @@ For an authenticated or self-hosted server, set `NTFY_TOKEN`. The notifier
 publishes urgent alerts with priority 5 and recovery messages with priority 3.
 Tapping a notification opens `NOTIFY_DASHBOARD_URL` when it is configured.
 
+## Administrator settings page
+
+The normal dashboard does not show notification administration. Open the
+dashboard with `?admin=1` appended, such as:
+
+```text
+http://192.168.1.50:8080/?admin=1
+```
+
+The **Settings** button then appears and prompts for `ADMIN_API_TOKEN`. The
+token is retained only in browser `sessionStorage`, so closing the tab removes
+it. The API independently checks the token on every read, update, and test
+request; hiding the button is only a convenience, not the security boundary.
+
+The page can:
+
+- enable or disable SMTP email and set one or more recipients;
+- enable or disable ntfy phone push;
+- optionally add a 10-digit Verizon number as a best-effort Vtext recipient;
+- display notifier health and the latest test result;
+- queue a clearly labeled test through the notifier service.
+
+SMTP credentials and the private ntfy topic cannot be viewed or changed from
+the page. They stay in `.env`, which prevents a stolen admin token from exposing
+the mail app password or ntfy topic.
+
 ## Why Verizon Vtext is not the primary phone channel
 
 Email sent to `10-digit-number@vtext.com` can still work for some Verizon
@@ -103,6 +131,9 @@ Sending a test is deliberately opt-in and is clearly labeled `TEST`:
 ```powershell
 wsl -d Ubuntu-Docker --cd $PWD -- docker compose exec -T notifier python notifier.py --test
 ```
+
+The administrator page's **Send test notification** button queues the same kind
+of test without giving the dashboard container access to delivery credentials.
 
 If both channels are enabled, that command must succeed through both. Failed
 attempts are logged in the `notification_deliveries` SQLite table with a short

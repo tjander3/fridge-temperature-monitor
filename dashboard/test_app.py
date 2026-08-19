@@ -193,6 +193,8 @@ class DashboardApiTests(unittest.TestCase):
         self.temporary_directory = tempfile.TemporaryDirectory()
         database = Path(self.temporary_directory.name) / "api-test.db"
         app.DashboardHandler.store = app.ReadingStore(database, SENSORS)
+        self.original_admin_token = app.ADMIN_API_TOKEN
+        app.ADMIN_API_TOKEN = "test-admin-token"
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), app.DashboardHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -202,6 +204,7 @@ class DashboardApiTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
+        app.ADMIN_API_TOKEN = self.original_admin_token
         self.temporary_directory.cleanup()
 
     def put_profile(self, sensor_id, payload):
@@ -210,6 +213,20 @@ class DashboardApiTests(unittest.TestCase):
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="PUT",
+        )
+        with urlopen(request, timeout=2) as response:
+            return response.status, json.load(response)
+
+    def admin_request(self, method, path, payload=None, token="test-admin-token"):
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"X-Admin-Token": token}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        request = Request(
+            f"{self.base_url}{path}",
+            data=body,
+            headers=headers,
+            method=method,
         )
         with urlopen(request, timeout=2) as response:
             return response.status, json.load(response)
@@ -232,6 +249,59 @@ class DashboardApiTests(unittest.TestCase):
         result = json.load(error)
         error.close()
         self.assertIn("minimum must be lower", result["error"])
+
+    def test_admin_settings_require_server_side_token(self):
+        with self.assertRaises(HTTPError) as context:
+            self.admin_request(
+                "GET", "/api/admin/notifications", token="incorrect-token"
+            )
+        error = context.exception
+        self.assertEqual(error.code, 401)
+        error.close()
+
+    def test_admin_can_save_notification_settings_and_queue_test(self):
+        status, settings = self.admin_request(
+            "PUT",
+            "/api/admin/notifications",
+            {
+                "email_enabled": True,
+                "email_to": "owner@example.com",
+                "ntfy_enabled": True,
+                "vtext_enabled": True,
+                "phone_number": "+1 (555) 555-1212",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(settings["email_to"], "owner@example.com")
+        self.assertEqual(settings["phone_number"], "5555551212")
+        self.assertTrue(settings["vtext_enabled"])
+
+        status, result = self.admin_request(
+            "POST", "/api/admin/notifications/test"
+        )
+        self.assertEqual(status, 202)
+        self.assertEqual(result["status"], "queued")
+        _, refreshed = self.admin_request("GET", "/api/admin/notifications")
+        self.assertEqual(refreshed["latest_test"]["status"], "pending")
+
+    def test_admin_settings_validate_email_and_phone(self):
+        with self.assertRaises(HTTPError) as context:
+            self.admin_request(
+                "PUT",
+                "/api/admin/notifications",
+                {
+                    "email_enabled": True,
+                    "email_to": "not-an-email",
+                    "ntfy_enabled": False,
+                    "vtext_enabled": True,
+                    "phone_number": "123",
+                },
+            )
+        error = context.exception
+        self.assertEqual(error.code, 400)
+        result = json.load(error)
+        error.close()
+        self.assertIn("valid", result["error"])
 
 
 if __name__ == "__main__":
