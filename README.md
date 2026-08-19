@@ -221,6 +221,54 @@ Unregister-ScheduledTask -TaskName "Fridge Temperature Monitor"
 
 Windows must remain awake for continuous monitoring. Sleeping, shutting down, or signing out stops USB forwarding. Configure the desktop not to sleep while plugged in if uninterrupted history is important.
 
+## Move to a new Windows computer
+
+Git contains the application and safe example configuration, but it deliberately
+does not contain installation-specific settings, credentials, sensor IDs, or
+temperature history. These pieces live in different places:
+
+| Item | Location | Included in this repository? | New-computer action |
+| --- | --- | --- | --- |
+| Application source and documentation | This checkout | Yes | Clone the repository. |
+| Email credentials, admin token, dashboard address, and selected sensor-file path | `.env` in the repository root | No; ignored by Git | Copy it through a secure channel or recreate it from `.env.example`. |
+| Sensor IDs, names, colors, notes, and first-run profiles | `dashboard/sensors.local.json` by default | No; ignored by Git | Copy it securely or recreate it from `dashboard/sensors.example.json`. |
+| Temperature readings, saved storage profiles, notification state, and alert history | Docker volume `fridge-temperature-monitor-data` | No | Restore a validated private backup or begin with a new database. |
+| USB supervisor state and diagnostic logs | Ignored `data/` directory | No | Do not migrate; the launcher recreates it. |
+| Portable weekly SQL dumps | Separate private `home-app-backups` repository | No | Clone the private repository and validate the latest dump. |
+| Monitor and backup schedules | Windows Task Scheduler | No | Run both task installers again. |
+| RTL-SDR sharing | `usbipd-win` machine configuration | No | Run the one-time USB setup again. |
+| LAN proxy, firewall rule, and Tailscale registration | Windows and Tailscale machine configuration | No | Reconfigure them for the new computer and its address. |
+
+The Docker volume is stored inside the selected WSL distribution under Docker's
+data directory. Do not copy or edit the live SQLite files there while the
+containers are running. Use the SQL backup workflow below so the snapshot is
+consistent and portable.
+
+On a new Windows computer:
+
+1. Install WSL, the expected Ubuntu distribution, Docker Engine with Compose,
+   `usbipd-win`, Git, Python, and GitHub CLI as described in
+   [Prerequisites](#prerequisites).
+2. Clone this repository to its permanent location. Scheduled tasks store
+   absolute paths, so moving the checkout later requires reinstalling them.
+3. Copy or recreate `.env` and `dashboard/sensors.local.json`. Never place a
+   real credential or sensor file in a public repository.
+4. Run `scripts/setup-docker-usb.ps1`, then `scripts/check-prerequisites.ps1`.
+5. Run `scripts/start-monitor.ps1`, followed by `scripts/test-system.ps1`, and
+   confirm the dashboard receives every configured sensor.
+6. Run `scripts/install-startup-task.ps1` to start monitoring at Windows
+   sign-in.
+7. Clone the private backup repository and run `python scripts/setup_backups.py`
+   to reinstall the weekly backup task for the new absolute paths.
+8. Recreate LAN or Tailscale access instead of copying old firewall or proxy
+   rules blindly; the new computer may have a different address.
+
+A new installation can start with an empty Docker volume. The existing restore
+command validates a dump and can create a standalone SQLite database for
+inspection, but importing that database into the live Docker volume is not yet
+automated. Keep the old computer or its private backup repository until the new
+installation is verified, and do not overwrite a running database manually.
+
 ## Dashboard and SQL data
 
 The local dashboard provides:
