@@ -30,6 +30,11 @@
 
 - [x] Add persistent storage-profile presets and a custom alert range selector to each sensor card.
 
+## Remote access
+
+- [ ] Make the dashboard securely available from the internet using private, authenticated access such as Tailscale, without exposing port `8080` directly through the router.
+- [ ] Verify access from a phone on cellular data and document setup, access control, troubleshooting, and how to revoke access.
+
 ## Raspberry Pi deployment
 
 - [ ] Select a Raspberry Pi 4/5, reliable storage, power supply, and Raspberry Pi OS Lite 64-bit.
