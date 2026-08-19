@@ -14,14 +14,14 @@ import app
 
 
 SENSORS = {
-    "41880": {
+    "10001": {
         "name": "Mini fridge",
         "color": "#37c9d9",
         "profile": "unmonitored",
         "monitoring": False,
         "maximum_f": 40,
     },
-    "52572": {
+    "10002": {
         "name": "Basement freezer",
         "color": "#ffb84d",
         "profile": "freezer",
@@ -41,7 +41,7 @@ class ReadingStoreTests(unittest.TestCase):
     def tearDown(self):
         self.temporary_directory.cleanup()
 
-    def event(self, sensor_id=52572, temperature=-11, observed_at=None):
+    def event(self, sensor_id=10002, temperature=-11, observed_at=None):
         return {
             "time": observed_at or app.iso_utc(app.utc_now()),
             "model": "Acurite-986",
@@ -58,7 +58,7 @@ class ReadingStoreTests(unittest.TestCase):
         self.assertTrue(self.store.add_event(event))
         self.assertFalse(self.store.add_event(event))
         data = self.store.dashboard_data(24)
-        freezer = next(sensor for sensor in data["sensors"] if sensor["id"] == 52572)
+        freezer = next(sensor for sensor in data["sensors"] if sensor["id"] == 10002)
         self.assertEqual(len(freezer["points"]), 1)
         self.assertEqual(freezer["status"], "ok")
         self.assertEqual(freezer["color"], "#ffb84d")
@@ -67,7 +67,7 @@ class ReadingStoreTests(unittest.TestCase):
         self.assertFalse(self.store.add_event({"model": "Other", "id": 1}))
 
     def test_rejects_incomplete_and_invalid_events(self):
-        self.assertFalse(self.store.add_event({"model": "Acurite-986", "id": 52572}))
+        self.assertFalse(self.store.add_event({"model": "Acurite-986", "id": 10002}))
         self.assertFalse(
             self.store.add_event(
                 {"model": "Acurite-986", "id": "not-an-id", "temperature_F": -4}
@@ -85,7 +85,7 @@ class ReadingStoreTests(unittest.TestCase):
         recent_freezer = next(
             sensor
             for sensor in recent_store.dashboard_data(24)["sensors"]
-            if sensor["id"] == 52572
+            if sensor["id"] == 10002
         )
         self.assertEqual(recent_freezer["status"], "ok")
 
@@ -93,27 +93,27 @@ class ReadingStoreTests(unittest.TestCase):
             app.utc_now() - timedelta(minutes=app.DEFAULT_STALE_MINUTES + 10)
         )
         self.store.add_event(self.event(observed_at=old_time))
-        freezer = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 52572)
+        freezer = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 10002)
         self.assertEqual(freezer["status"], "stale")
 
         fresh_store = app.ReadingStore(
             Path(self.temporary_directory.name) / "warm.db", SENSORS
         )
         fresh_store.add_event(self.event(temperature=8))
-        freezer = next(sensor for sensor in fresh_store.dashboard_data(24)["sensors"] if sensor["id"] == 52572)
+        freezer = next(sensor for sensor in fresh_store.dashboard_data(24)["sensors"] if sensor["id"] == 10002)
         self.assertEqual(freezer["status"], "too_warm")
 
     def test_desk_sensor_stays_in_setup_mode(self):
-        self.store.add_event(self.event(sensor_id=41880, temperature=70))
-        mini_fridge = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 41880)
+        self.store.add_event(self.event(sensor_id=10001, temperature=70))
+        mini_fridge = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 10001)
         self.assertEqual(mini_fridge["status"], "setup")
 
     def test_storage_profile_preset_persists_in_sqlite(self):
-        self.store.update_sensor_profile(41880, "beverage")
-        self.store.add_event(self.event(sensor_id=41880, temperature=42))
+        self.store.update_sensor_profile(10001, "beverage")
+        self.store.add_event(self.event(sensor_id=10001, temperature=42))
         sensor = next(
             sensor for sensor in self.store.dashboard_data(24)["sensors"]
-            if sensor["id"] == 41880
+            if sensor["id"] == 10001
         )
         self.assertEqual(sensor["profile"], "beverage")
         self.assertTrue(sensor["monitoring"])
@@ -124,24 +124,24 @@ class ReadingStoreTests(unittest.TestCase):
         reopened = app.ReadingStore(self.store.database_path, SENSORS)
         sensor = next(
             sensor for sensor in reopened.dashboard_data(24)["sensors"]
-            if sensor["id"] == 41880
+            if sensor["id"] == 10001
         )
         self.assertEqual(sensor["profile"], "beverage")
         self.assertEqual(sensor["maximum_f"], 45)
 
     def test_custom_profile_validates_and_applies_range(self):
         with self.assertRaisesRegex(ValueError, "minimum must be lower"):
-            self.store.update_sensor_profile(41880, "custom", 50, 40)
+            self.store.update_sensor_profile(10001, "custom", 50, 40)
         with self.assertRaisesRegex(ValueError, "unknown storage profile"):
-            self.store.update_sensor_profile(41880, "not-a-profile")
+            self.store.update_sensor_profile(10001, "not-a-profile")
         with self.assertRaises(KeyError):
             self.store.update_sensor_profile(12345, "beverage")
 
-        self.store.update_sensor_profile(41880, "custom", 35, 41)
-        self.store.add_event(self.event(sensor_id=41880, temperature=42))
+        self.store.update_sensor_profile(10001, "custom", 35, 41)
+        self.store.add_event(self.event(sensor_id=10001, temperature=42))
         sensor = next(
             sensor for sensor in self.store.dashboard_data(24)["sensors"]
-            if sensor["id"] == 41880
+            if sensor["id"] == 10001
         )
         self.assertEqual(sensor["profile"], "custom")
         self.assertEqual(sensor["status"], "too_warm")
@@ -158,12 +158,12 @@ class ReadingStoreTests(unittest.TestCase):
         event = self.event(temperature=12)
         event["battery_ok"] = 0
         self.store.add_event(event)
-        freezer = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 52572)
+        freezer = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 10002)
         self.assertEqual(freezer["status"], "low_battery")
 
     def test_reports_too_cold_when_a_minimum_is_configured(self):
         sensors = {
-            "41880": {
+            "10001": {
                 "name": "Mini fridge",
                 "monitoring": True,
                 "minimum_f": 32,
@@ -171,7 +171,7 @@ class ReadingStoreTests(unittest.TestCase):
             }
         }
         store = app.ReadingStore(Path(self.temporary_directory.name) / "cold.db", sensors)
-        store.add_event(self.event(sensor_id=41880, temperature=28))
+        store.add_event(self.event(sensor_id=10001, temperature=28))
         sensor = store.dashboard_data(24)["sensors"][0]
         self.assertEqual(sensor["status"], "too_cold")
 
@@ -201,7 +201,7 @@ class ReadingStoreTests(unittest.TestCase):
     def test_syslog_json_shape_is_valid(self):
         payload = '<165>1 2026-08-17T22:26:37Z host rtl_433 - - - ' + json.dumps(self.event())
         event = json.loads(payload[payload.find("{"):])
-        self.assertEqual(event["id"], 52572)
+        self.assertEqual(event["id"], 10002)
 
 
 class DashboardApiTests(unittest.TestCase):
@@ -248,7 +248,7 @@ class DashboardApiTests(unittest.TestCase):
             return response.status, json.load(response)
 
     def test_profile_endpoint_saves_preset(self):
-        status, result = self.put_profile(41880, {"profile": "beverage"})
+        status, result = self.put_profile(10001, {"profile": "beverage"})
         self.assertEqual(status, 200)
         self.assertEqual(result["sensor"]["profile"], "beverage")
         self.assertEqual(result["sensor"]["minimum_f"], 34)
@@ -257,7 +257,7 @@ class DashboardApiTests(unittest.TestCase):
     def test_profile_endpoint_rejects_invalid_custom_range(self):
         with self.assertRaises(HTTPError) as context:
             self.put_profile(
-                41880,
+                10001,
                 {"profile": "custom", "minimum_f": 50, "maximum_f": 40},
             )
         error = context.exception

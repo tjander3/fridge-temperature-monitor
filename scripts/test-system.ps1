@@ -2,6 +2,7 @@
 param(
     [string]$WslDistribution = "Ubuntu-Docker",
     [int[]]$SensorIds,
+    [string]$SensorsFile,
     [int]$FreshMinutes = 10,
     [int]$SensorWaitSeconds = 180,
     [switch]$SkipLiveSensors
@@ -11,7 +12,27 @@ $ErrorActionPreference = "Continue"
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $results = [Collections.Generic.List[object]]::new()
 if (-not $SensorIds) {
-    $sensorConfiguration = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "dashboard\sensors.json") |
+    if (-not $SensorsFile) {
+        $environmentFile = Join-Path $repositoryRoot ".env"
+        if (Test-Path -LiteralPath $environmentFile) {
+            $sensorSetting = Get-Content -LiteralPath $environmentFile |
+                Where-Object { $_ -match "^\s*SENSORS_FILE\s*=" } |
+                Select-Object -First 1
+            if ($sensorSetting) {
+                $SensorsFile = ($sensorSetting -split "=", 2)[1].Trim().Trim('"').Trim("'")
+            }
+        }
+    }
+    if (-not $SensorsFile) {
+        $SensorsFile = "dashboard\sensors.example.json"
+    }
+    if (-not [IO.Path]::IsPathRooted($SensorsFile)) {
+        $SensorsFile = Join-Path $repositoryRoot $SensorsFile
+    }
+    if (-not (Test-Path -LiteralPath $SensorsFile)) {
+        throw "Sensor configuration was not found: $SensorsFile"
+    }
+    $sensorConfiguration = Get-Content -Raw -LiteralPath $SensorsFile |
         ConvertFrom-Json
     $SensorIds = @($sensorConfiguration.PSObject.Properties.Name | ForEach-Object { [int]$_ })
 }

@@ -12,7 +12,7 @@ import notifier
 
 
 SENSORS = {
-    "41880": {
+    "10001": {
         "name": "Mini fridge",
         "profile": "beverage",
         "monitoring": True,
@@ -54,7 +54,7 @@ class AlertEngineTests(unittest.TestCase):
         return {
             "time": app.iso_utc(self.base + timedelta(minutes=minutes)),
             "model": "Acurite-986",
-            "id": 41880,
+            "id": 10001,
             "channel": "2F",
             "battery_ok": battery_ok,
             "temperature_F": temperature,
@@ -168,7 +168,7 @@ class AlertEngineTests(unittest.TestCase):
             ).fetchall()
             last_sent = connection.execute(
                 "SELECT last_sent_at FROM alert_states "
-                "WHERE sensor_id = 41880 AND kind = 'too_warm'"
+                "WHERE sensor_id = 10001 AND kind = 'too_warm'"
             ).fetchone()[0]
         self.assertEqual(deliveries[0][:2], ("success", 1))
         self.assertEqual(deliveries[1][:2], ("failure", 0))

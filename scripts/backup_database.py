@@ -148,8 +148,17 @@ def ensure_backup_repository(repository: Path) -> None:
         raise BackupError(
             f"backup repository is not initialized: {repository}; run setup_backups.py"
         )
-    run(["git", "config", "user.name", "Tyler Anderson"], cwd=repository)
-    run(["git", "config", "user.email", "tjander22@gmail.com"], cwd=repository)
+    identity = {
+        key: run(["git", "config", "--get", key], cwd=repository, check=False)
+        .stdout.strip()
+        for key in ("user.name", "user.email")
+    }
+    missing = [key for key, value in identity.items() if not value]
+    if missing:
+        raise BackupError(
+            "Git identity is not configured for the backup repository; set "
+            + " and ".join(missing)
+        )
 
 
 def find_github_cli() -> str:
