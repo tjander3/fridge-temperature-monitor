@@ -23,7 +23,7 @@ try {
     }
 
     Write-Host "[2/5] Compiling Python"
-    & python -m py_compile dashboard/app.py dashboard/test_app.py
+    & python -m py_compile dashboard/app.py dashboard/notifier.py dashboard/test_app.py dashboard/test_notifier.py
     if ($LASTEXITCODE -ne 0) { throw "Python compilation failed." }
 
     Write-Host "[3/5] Running dashboard unit tests"

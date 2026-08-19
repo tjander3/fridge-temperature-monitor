@@ -6,7 +6,7 @@ Local refrigerator and freezer temperature history using an RTL-SDR receiver, Ac
 
 Current follow-up work is tracked in [TODO.md](TODO.md).
 
-> **Project status:** working prototype. RF reception, AcuRite decoding, storage, the dashboard, and the direct-USB all-Docker runtime were proven with two live sensors on August 17, 2026. The complete live system suite passes 14/14 checks. This is a hobby monitor, not a certified food-safety device.
+> **Project status:** working prototype. RF reception, AcuRite decoding, storage, the dashboard, notifications, and the direct-USB all-Docker runtime were proven with two live sensors. The complete live system suite passes 16/16 checks. This is a hobby monitor, not a certified food-safety device.
 
 ## Features
 
@@ -14,6 +14,7 @@ Current follow-up work is tracked in [TODO.md](TODO.md).
 - stores deduplicated readings in SQLite;
 - displays current temperature, battery state, last contact, and history charts;
 - detects stale, warm, cold, and low-battery states;
+- sends persistent, duplicate-suppressed alerts through SMTP email and optional ntfy phone push;
 - lets users select persistent food, freezer, beverage, wine, custom, or readings-only alert profiles from the dashboard;
 - can expose the dashboard to the same private LAN through a restricted Windows firewall rule;
 - includes fast CI tests, full-history secret scanning, and a separate live hardware/system test suite;
@@ -50,9 +51,11 @@ RTL-SDR USB
       | usbipd-win forwards the physical device to WSL
       v
 Docker: rtl_433 -> JSON over private UDP -> dashboard + SQLite
-                                                 |
+                                                 |       |
+                                                 |       v
+                                                 |   notifier -> email + ntfy
                                                  v
-                 Docker named volume + localhost:8080
+                                  named volume + localhost:8080
 ```
 
 There is no Windows `rtl_tcp` process, host database service, or Docker Desktop dependency. The SQLite engine runs inside the dashboard container, and its database lives in the Docker-managed `fridge-temperature-monitor-data` volume.
@@ -238,11 +241,17 @@ At one reading every two minutes per sensor, plan on roughly 100–250 MB of SQL
 
 The database is not committed to Git. Back up the `fridge-temperature-monitor-data` Docker volume before destructive Docker maintenance or moving the installation to another computer.
 
-## Planned notifications
+## Notifications
 
-The recommended next phase is a Dockerized notifier with SMTP email plus optional ntfy phone push. It will require consecutive bad readings, suppress duplicate messages, record alert state in SQLite, and send recovery notifications. True SMS through Twilio can be added later if phone push is not sufficient.
+The Dockerized notifier supports SMTP email and optional ntfy phone push. It waits for two distinct bad readings before temperature or low-battery alerts, suppresses duplicates, sends timed reminders, persists state in SQLite, and sends recovery notifications. A stale sensor alerts after its configured timeout.
 
-See [the notification plan](docs/notifications.md) for alert timing, secrets, reliability limitations, and the tests that will accompany implementation.
+Copy `.env.example` to the ignored `.env` file and enable one or both channels. Gmail requires a 16-character app password rather than the account password. Run an explicit test only after configuration:
+
+```powershell
+wsl -d Ubuntu-Docker --cd $PWD -- docker compose exec -T notifier python notifier.py --test
+```
+
+See [the notification guide](docs/notifications.md) for complete setup, alert timing, security, Verizon Vtext retirement information, troubleshooting, and test commands.
 
 ## Power strategy
 
@@ -281,7 +290,7 @@ After starting the monitor, run the live hardware and system suite:
 The live suite prints an individual pass/fail result for:
 
 - `usbipd-win`, the Windows RTL-SDR, USB attachment, and WSL USB visibility;
-- Docker Engine, both Compose containers, and rtl_433 receiver initialization;
+- Docker Engine, all three Compose services, notifier health, and rtl_433 receiver initialization;
 - dashboard health API and recognizable UI content;
 - SQLite integrity plus a real transactional write and rollback;
 - fresh readings from sensor `41880` and sensor `52572`.

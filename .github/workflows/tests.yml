@@ -34,21 +34,30 @@ jobs:
       - name: Run commit-time suite
         shell: pwsh
         run: ./scripts/test-ci.ps1
-      - name: Build and smoke-test dashboard container
+      - name: Build and smoke-test application containers
         shell: bash
         run: |
           set -euo pipefail
           cleanup() {
-            docker compose logs --no-color dashboard || true
+            docker compose logs --no-color dashboard notifier || true
             docker compose down --volumes || true
           }
           trap cleanup EXIT
-          docker compose up --detach --build dashboard
+          docker compose up --detach --build dashboard notifier
           for attempt in {1..15}; do
+            dashboard_ok=false
+            notifier_ok=false
             if curl --fail --silent http://127.0.0.1:8080/api/health | grep --quiet '"status":"ok"'; then
+              dashboard_ok=true
+            fi
+            notifier_id="$(docker compose ps --quiet notifier)"
+            if [[ -n "$notifier_id" ]] && [[ "$(docker inspect --format '{{.State.Health.Status}}' "$notifier_id")" == "healthy" ]]; then
+              notifier_ok=true
+            fi
+            if [[ "$dashboard_ok" == true && "$notifier_ok" == true ]]; then
               exit 0
             fi
             sleep 2
           done
-          echo "Dashboard did not become healthy in time" >&2
+          echo "Application containers did not become healthy in time" >&2
           exit 1

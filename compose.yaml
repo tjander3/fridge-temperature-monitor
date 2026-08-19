@@ -1,5 +1,6 @@
 services:
   dashboard:
+    image: fridge-temperature-monitor-dashboard
     build:
       context: ./dashboard
     ports:
@@ -17,6 +18,43 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  notifier:
+    image: fridge-temperature-monitor-dashboard
+    command:
+      - python
+      - notifier.py
+    environment:
+      NOTIFIER_POLL_SECONDS: "${NOTIFIER_POLL_SECONDS:-30}"
+      NOTIFY_DASHBOARD_URL: "${NOTIFY_DASHBOARD_URL:-}"
+      NOTIFY_EMAIL_ENABLED: "${NOTIFY_EMAIL_ENABLED:-false}"
+      SMTP_HOST: "${SMTP_HOST:-smtp.gmail.com}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_SECURITY: "${SMTP_SECURITY:-starttls}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_APP_PASSWORD: "${SMTP_APP_PASSWORD:-}"
+      NOTIFY_EMAIL_FROM: "${NOTIFY_EMAIL_FROM:-}"
+      NOTIFY_EMAIL_TO: "${NOTIFY_EMAIL_TO:-}"
+      NTFY_ENABLED: "${NTFY_ENABLED:-false}"
+      NTFY_URL: "${NTFY_URL:-https://ntfy.sh}"
+      NTFY_TOPIC: "${NTFY_TOPIC:-}"
+      NTFY_TOKEN: "${NTFY_TOKEN:-}"
+    volumes:
+      - monitor-data:/data
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - notifier.py
+        - --healthcheck
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   rtl433:
     image: hertzg/rtl_433:25.12

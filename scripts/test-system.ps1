@@ -70,8 +70,18 @@ Add-Check "Runtime" "Docker Engine responds" ($docker.ExitCode -eq 0) $(if ($doc
 $services = Invoke-Wsl docker compose ps --services --status running
 $dashboardRunning = $services.Output -split "\s+" -contains "dashboard"
 $decoderRunning = $services.Output -split "\s+" -contains "rtl433"
+$notifierRunning = $services.Output -split "\s+" -contains "notifier"
 Add-Check "Docker" "Dashboard container running" $dashboardRunning $services.Output
 Add-Check "Docker" "Decoder container running" $decoderRunning $services.Output
+Add-Check "Docker" "Notifier container running" $notifierRunning $services.Output
+
+$notifierContainer = Invoke-Wsl docker compose ps -q notifier
+$notifierHealth = if ($notifierContainer.ExitCode -eq 0 -and $notifierContainer.Output) {
+    Invoke-Wsl docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' $notifierContainer.Output
+} else {
+    [pscustomobject]@{ ExitCode = 1; Output = "notifier container not found" }
+}
+Add-Check "Docker" "Notifier health check passes" ($notifierHealth.ExitCode -eq 0 -and $notifierHealth.Output -eq "healthy") $notifierHealth.Output
 
 try {
     $health = Invoke-RestMethod "http://localhost:8080/api/health" -TimeoutSec 5
