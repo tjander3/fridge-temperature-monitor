@@ -239,7 +239,58 @@ Docker binds the dashboard to loopback TCP port `8080`, so it remains desktop-on
 
 At one reading every two minutes per sensor, plan on roughly 100–250 MB of SQLite growth per year. A retention or downsampling job can be added later if long-term size becomes important.
 
-The database is not committed to Git. Back up the `fridge-temperature-monitor-data` Docker volume before destructive Docker maintenance or moving the installation to another computer.
+The live database is not committed to this application repository. A separate
+private GitHub repository can receive a verified SQL dump once a week. The
+Windows Python scheduler asks the running dashboard container for a consistent
+SQLite snapshot, restores that dump into a temporary database as a validation
+step, verifies that GitHub still reports the destination as private, and only
+then commits and pushes it. Git and GitHub credentials stay on Windows; the
+container only reads its own `/data/fridge-monitor.db` volume.
+
+### Weekly private GitHub backups
+
+Authenticate GitHub CLI once, then run the setup script from the repository
+root:
+
+```powershell
+gh auth login
+python scripts/setup_backups.py
+```
+
+The defaults create or reuse `tjander3/home-app-backups`, refuse to continue
+unless GitHub reports that repository as **private**, clone it beside this
+repository, create and push the first backup, and install the Windows task
+`Fridge Temperature Monitor Weekly Database Backup`. It runs every Sunday at
+3:00 AM. The task uses the current Windows login and `StartWhenAvailable`, so a
+missed run starts after the next login when the network is available.
+
+The private repository contains two managed files:
+
+- `fridge-monitor.sql` — the complete, readable SQLite schema and data;
+- `backup-manifest.json` — creation time, SHA-256, size, integrity result, and
+  row count for each table.
+
+Run or test the process manually:
+
+```powershell
+python scripts/backup_database.py
+python scripts/restore_database.py
+```
+
+The restore command defaults to a temporary test restore and does not touch the
+live Docker volume. To create a standalone recovered database for inspection or
+migration, specify a new output path:
+
+```powershell
+python scripts/restore_database.py --output .\restored-fridge-monitor.db
+```
+
+The weekly log is stored at
+`%LOCALAPPDATA%\FridgeTemperatureMonitor\backup.log`. Do not copy the running
+`.db`, `-wal`, or `-shm` files directly from the Docker volume; use the export
+script so all tables come from one consistent database snapshot. Run
+`python scripts/setup_backups.py --help` to change the private repository,
+schedule, WSL distribution, or Windows task name.
 
 ## Notifications
 
