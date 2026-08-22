@@ -12,6 +12,33 @@ $stopFile = Join-Path $dataDirectory "monitor.stop"
 $hardwareId = "0bda:2838"
 $supervisorModule = Join-Path $PSScriptRoot "monitor-supervisor.psm1"
 Import-Module $supervisorModule -Force
+$monitorProcesses = @{}
+
+function Save-MonitorProcesses {
+    if ($monitorProcesses.Count -eq 0) {
+        Remove-Item -LiteralPath $processFile -Force -ErrorAction SilentlyContinue
+        return
+    }
+
+    $monitorProcesses |
+        ConvertTo-Json |
+        Set-Content -LiteralPath $processFile
+}
+
+function Stop-RecordedProcess {
+    param(
+        [object]$ProcessId,
+        [string[]]$ExpectedNames
+    )
+
+    if (-not $ProcessId) {
+        return
+    }
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($process -and $process.ProcessName -in $ExpectedNames) {
+        Stop-Process -Id $process.Id -Force
+    }
+}
 
 $usbipd = Get-Command usbipd.exe -ErrorAction SilentlyContinue
 $usbipdPath = if ($usbipd) {
@@ -30,10 +57,9 @@ Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue
 
 if (Test-Path -LiteralPath $processFile) {
     $priorProcesses = Get-Content -Raw -LiteralPath $processFile | ConvertFrom-Json
-    if ($priorProcesses.usbipd_attach_pid) {
-        Get-Process -Id $priorProcesses.usbipd_attach_pid -ErrorAction SilentlyContinue |
-            Stop-Process -Force
-    }
+    Stop-RecordedProcess $priorProcesses.usbipd_attach_pid @("usbipd")
+    Stop-RecordedProcess $priorProcesses.lan_proxy_pid @("python", "pythonw")
+    Remove-Item -LiteralPath $processFile -Force -ErrorAction SilentlyContinue
 }
 
 # usbipd's auto-attach process keeps WSL active and reconnects the SDR after a
@@ -44,6 +70,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $usbAttach = $null
+$lanProxy = $null
 try {
     $usbAttach = Start-Process `
         -FilePath $usbipdPath `
@@ -82,14 +109,68 @@ try {
     Write-Host "Cold Storage Monitor is running entirely in Docker: http://localhost:8080"
     if ($attachState -eq "running") {
         Write-Host "USB auto-attach PID: $($usbAttach.Id)"
-        @{ usbipd_attach_pid = $usbAttach.Id } |
-            ConvertTo-Json |
-            Set-Content -LiteralPath $processFile
+        $monitorProcesses.usbipd_attach_pid = $usbAttach.Id
     }
     else {
-        Remove-Item -LiteralPath $processFile -Force -ErrorAction SilentlyContinue
         Write-Host "USB auto-attach was handed off successfully to WSL."
     }
+
+    $lanAddress = Get-PreferredLanAddress
+    if ($lanAddress) {
+        $lanDashboardUri = "http://${lanAddress}:8080/"
+        $lanDashboardAvailable = try {
+            (Invoke-RestMethod -Uri "${lanDashboardUri}api/health" -TimeoutSec 2).status -eq "ok"
+        }
+        catch {
+            $false
+        }
+
+        if (-not $lanDashboardAvailable) {
+            $python = Get-Command pythonw.exe -ErrorAction SilentlyContinue
+            if (-not $python) {
+                $python = Get-Command python.exe -ErrorAction Stop
+            }
+            $lanProxyScript = Join-Path $PSScriptRoot "lan_proxy.py"
+            $lanProxyLog = Join-Path $dataDirectory "lan-proxy.log"
+            $quotedLanProxyScript = '"{0}"' -f $lanProxyScript
+            $quotedLanProxyLog = '"{0}"' -f $lanProxyLog
+            $lanProxy = Start-Process `
+                -FilePath $python.Source `
+                -ArgumentList @(
+                    $quotedLanProxyScript,
+                    "--listen-host", $lanAddress,
+                    "--listen-port", "8080",
+                    "--target-host", "127.0.0.1",
+                    "--target-port", "8080",
+                    "--log-file", $quotedLanProxyLog
+                ) `
+                -WindowStyle Hidden `
+                -PassThru
+            Start-Sleep -Seconds 1
+            $lanProxy.Refresh()
+            if ($lanProxy.HasExited) {
+                throw "The LAN dashboard relay failed to start. Check data\lan-proxy.log."
+            }
+            $lanDashboardAvailable = try {
+                (Invoke-RestMethod -Uri "${lanDashboardUri}api/health" -TimeoutSec 5).status -eq "ok"
+            }
+            catch {
+                $false
+            }
+            if (-not $lanDashboardAvailable) {
+                throw "The LAN dashboard relay started but did not answer at $lanDashboardUri."
+            }
+            $monitorProcesses.lan_proxy_pid = $lanProxy.Id
+            Write-Host "LAN dashboard relay PID: $($lanProxy.Id)"
+        }
+
+        Write-Host "Same-Wi-Fi dashboard: $lanDashboardUri"
+    }
+    else {
+        Write-Warning "No active LAN address with a default gateway was found; same-Wi-Fi access was not started."
+    }
+
+    Save-MonitorProcesses
 
     if (-not $NoWait -and $attachState -eq "running") {
         Write-Host "Leave this process running. Press Ctrl+C to stop monitoring."
@@ -103,7 +184,8 @@ try {
             return
         }
         if ($usbAttach.ExitCode -eq 0) {
-            Remove-Item -LiteralPath $processFile -Force -ErrorAction SilentlyContinue
+            $monitorProcesses.Remove("usbipd_attach_pid") | Out-Null
+            Save-MonitorProcesses
             Write-Host "USB auto-attach was handed off successfully to WSL."
             return
         }
@@ -113,6 +195,9 @@ try {
 catch {
     if ($usbAttach -and -not $usbAttach.HasExited) {
         Stop-Process -Id $usbAttach.Id -Force
+    }
+    if ($lanProxy -and -not $lanProxy.HasExited) {
+        Stop-Process -Id $lanProxy.Id -Force
     }
     Remove-Item -LiteralPath $processFile -Force -ErrorAction SilentlyContinue
     throw

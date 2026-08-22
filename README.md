@@ -148,8 +148,9 @@ Docker retains all readings in its named SQL volume when the containers stop or 
 
 The Compose configuration binds the dashboard to loopback TCP port `8080`.
 WSL's default Windows integration forwards that service to `127.0.0.1` on the
-Windows host. A narrowly scoped Windows port proxy and firewall rule are needed
-for a phone or tablet on the same LAN.
+Windows host. `scripts/start-monitor.ps1` also starts a user-level relay bound
+only to the active Windows LAN address. A narrowly scoped firewall rule is
+needed once for a phone or tablet on the same LAN.
 
 First, run `ipconfig` and note the IPv4 address and interface name for the
 active Wi-Fi connection. Then open **PowerShell as Administrator**, replace
@@ -158,12 +159,6 @@ the two example values below, and run:
 ```powershell
 $lanAddress = "192.168.1.50"
 $interfaceAlias = "Wi-Fi"
-
-netsh interface portproxy add v4tov4 `
-  listenport=8080 `
-  listenaddress=$lanAddress `
-  connectport=8080 `
-  connectaddress=127.0.0.1
 
 New-NetFirewallRule `
   -DisplayName "Fridge Temperature Monitor (LAN)" `
@@ -178,24 +173,21 @@ New-NetFirewallRule `
   -Profile Any
 ```
 
-With the monitor running, open `http://<desktop-ip-address>:8080` on a device
-connected to the same Wi-Fi. The desktop must remain powered on and awake.
-Verify the proxy with `netsh interface portproxy show v4tov4`.
+With the monitor running, the startup script prints the same-Wi-Fi URL. Open
+that URL on a device connected to the same Wi-Fi. The desktop must remain
+powered on and awake. The relay process is recorded in
+`data/monitor-processes.json` and is stopped by `scripts/stop-monitor.ps1`.
 
 The dashboard has no application login. Do not forward port `8080` on the
 router or expose it directly to the internet. For future remote access, use an
 authenticated private network such as Tailscale instead.
 
-If DHCP gives the desktop a different address, delete the old proxy and rerun
-the setup using the new address. To remove LAN access completely, run these
-commands from Administrator PowerShell, substituting the address used during
-setup:
+The relay detects the active address whenever the monitor starts. If DHCP gives
+the desktop a different address, recreate the firewall rule with that new
+address. To remove LAN access completely, run this command from Administrator
+PowerShell:
 
 ```powershell
-netsh interface portproxy delete v4tov4 `
-  listenport=8080 `
-  listenaddress=192.168.1.50
-
 Remove-NetFirewallRule -DisplayName "Fridge Temperature Monitor (LAN)"
 ```
 
@@ -241,7 +233,7 @@ temperature history. These pieces live in different places:
 | Portable weekly SQL dumps | Separate private `home-app-backups` repository | No | Clone the private repository and validate the latest dump. |
 | Monitor and backup schedules | Windows Task Scheduler | No | Run both task installers again. |
 | RTL-SDR sharing | `usbipd-win` machine configuration | No | Run the one-time USB setup again. |
-| LAN proxy, firewall rule, and Tailscale registration | Windows and Tailscale machine configuration | No | Reconfigure them for the new computer and its address. |
+| LAN firewall rule and Tailscale registration | Windows and Tailscale machine configuration | No | Reconfigure them for the new computer and its address; the LAN relay itself starts from the cloned repository. |
 
 The Docker volume is stored inside the selected WSL distribution under Docker's
 data directory. Do not copy or edit the live SQLite files there while the
@@ -305,7 +297,7 @@ The file selected by `SENSORS_FILE` supplies first-run defaults and labels; a
 saved dashboard selection takes precedence. Preset limits are alert thresholds,
 not commands sent to the refrigerator or freezer.
 
-Docker binds the dashboard to loopback TCP port `8080`, so it remains desktop-only unless the LAN proxy and restricted firewall rule above are installed. The decoder and dashboard communicate across the private Compose network.
+Docker binds the dashboard to loopback TCP port `8080`, so it remains desktop-only unless the user-level LAN relay is running and the restricted firewall rule above is installed. The decoder and dashboard communicate across the private Compose network.
 
 At one reading every two minutes per sensor, plan on roughly 100–250 MB of SQLite growth per year. A retention or downsampling job can be added later if long-term size becomes important.
 
