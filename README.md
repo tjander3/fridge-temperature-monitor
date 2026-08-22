@@ -213,6 +213,10 @@ The task starts at the next sign-in and restarts the supervisor up to three time
 Start-ScheduledTask -TaskName "Fridge Temperature Monitor"
 ```
 
+With usbipd-win 5.x, Task Scheduler may show the task as `Ready` after startup.
+That is expected when usbipd has successfully handed its long-running USB
+auto-attach helper to WSL; the Docker services continue running there.
+
 To remove it later:
 
 ```powershell
