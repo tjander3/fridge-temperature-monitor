@@ -10,6 +10,8 @@ $dataDirectory = Join-Path $repositoryRoot "data"
 $processFile = Join-Path $dataDirectory "monitor-processes.json"
 $stopFile = Join-Path $dataDirectory "monitor.stop"
 $hardwareId = "0bda:2838"
+$supervisorModule = Join-Path $PSScriptRoot "monitor-supervisor.psm1"
+Import-Module $supervisorModule -Force
 
 $usbipd = Get-Command usbipd.exe -ErrorAction SilentlyContinue
 $usbipdPath = if ($usbipd) {
@@ -57,7 +59,12 @@ try {
         -PassThru
 
     Start-Sleep -Seconds 3
-    if ($usbAttach.HasExited) {
+    $usbAttach.Refresh()
+    $attachExitCode = if ($usbAttach.HasExited) { $usbAttach.ExitCode } else { $null }
+    $attachState = Get-UsbAttachLauncherState `
+        -HasExited $usbAttach.HasExited `
+        -ExitCode $attachExitCode
+    if ($attachState -eq "failed") {
         throw "USB attachment failed. Check data\usbipd.stderr.log and run setup-docker-usb.ps1 if needed."
     }
 
@@ -73,13 +80,18 @@ try {
 
     Write-Host ""
     Write-Host "Cold Storage Monitor is running entirely in Docker: http://localhost:8080"
-    Write-Host "USB auto-attach PID: $($usbAttach.Id)"
+    if ($attachState -eq "running") {
+        Write-Host "USB auto-attach PID: $($usbAttach.Id)"
+        @{ usbipd_attach_pid = $usbAttach.Id } |
+            ConvertTo-Json |
+            Set-Content -LiteralPath $processFile
+    }
+    else {
+        Remove-Item -LiteralPath $processFile -Force -ErrorAction SilentlyContinue
+        Write-Host "USB auto-attach was handed off successfully to WSL."
+    }
 
-    @{ usbipd_attach_pid = $usbAttach.Id } |
-        ConvertTo-Json |
-        Set-Content -LiteralPath $processFile
-
-    if (-not $NoWait) {
+    if (-not $NoWait -and $attachState -eq "running") {
         Write-Host "Leave this process running. Press Ctrl+C to stop monitoring."
         while (-not $usbAttach.HasExited) {
             Start-Sleep -Seconds 5
@@ -88,6 +100,11 @@ try {
         if (Test-Path -LiteralPath $stopFile) {
             Remove-Item -LiteralPath $stopFile, $processFile -Force -ErrorAction SilentlyContinue
             Write-Host "Cold Storage Monitor stopped normally."
+            return
+        }
+        if ($usbAttach.ExitCode -eq 0) {
+            Remove-Item -LiteralPath $processFile -Force -ErrorAction SilentlyContinue
+            Write-Host "USB auto-attach was handed off successfully to WSL."
             return
         }
         throw "USB auto-attach stopped unexpectedly. Restart this script to resume monitoring."
