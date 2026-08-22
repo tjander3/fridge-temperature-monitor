@@ -29,7 +29,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Startup supervisor tests failed." }
 
     Write-Host "[3/6] Compiling Python"
-    & python -m py_compile dashboard/app.py dashboard/notifier.py dashboard/test_app.py dashboard/test_notifier.py scripts/sqlite_dump.py scripts/backup_database.py scripts/restore_database.py scripts/setup_backups.py scripts/test_backups.py
+    & python -m py_compile dashboard/app.py dashboard/notifier.py dashboard/test_app.py dashboard/test_notifier.py scripts/sqlite_dump.py scripts/backup_database.py scripts/restore_database.py scripts/setup_backups.py scripts/test_backups.py scripts/lan_proxy.py scripts/test_lan_proxy.py
     if ($LASTEXITCODE -ne 0) { throw "Python compilation failed." }
 
     Write-Host "[4/6] Running dashboard unit tests"

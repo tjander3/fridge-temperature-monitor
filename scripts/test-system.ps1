@@ -10,6 +10,8 @@ param(
 
 $ErrorActionPreference = "Continue"
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$supervisorModule = Join-Path $PSScriptRoot "monitor-supervisor.psm1"
+Import-Module $supervisorModule -Force
 $results = [Collections.Generic.List[object]]::new()
 if (-not $SensorIds) {
     if (-not $SensorsFile) {
@@ -121,6 +123,20 @@ try {
 }
 catch {
     Add-Check "Web" "Dashboard UI loads" $false $_.Exception.Message
+}
+
+$lanAddress = Get-PreferredLanAddress
+if ($lanAddress) {
+    try {
+        $lanHealth = Invoke-RestMethod "http://${lanAddress}:8080/api/health" -TimeoutSec 5
+        Add-Check "Web" "Same-Wi-Fi dashboard responds" ($lanHealth.status -eq "ok") "http://${lanAddress}:8080"
+    }
+    catch {
+        Add-Check "Web" "Same-Wi-Fi dashboard responds" $false $_.Exception.Message
+    }
+}
+else {
+    Add-Check "Web" "Same-Wi-Fi dashboard responds" $false "No active LAN address with a default gateway was found"
 }
 
 $sqlCode = @'

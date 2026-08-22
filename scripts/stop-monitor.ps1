@@ -23,6 +23,12 @@ if (Test-Path -LiteralPath $processFile) {
             Stop-Process -Id $process.Id -Force
         }
     }
+    if ($monitorProcesses.lan_proxy_pid) {
+        $process = Get-Process -Id $monitorProcesses.lan_proxy_pid -ErrorAction SilentlyContinue
+        if ($process -and $process.ProcessName -in @("python", "pythonw")) {
+            Stop-Process -Id $process.Id -Force
+        }
+    }
     Remove-Item -LiteralPath $processFile -Force
 }
 
