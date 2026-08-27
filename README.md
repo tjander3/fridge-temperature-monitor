@@ -61,6 +61,10 @@ Docker: rtl_433 -> JSON over private UDP -> dashboard + SQLite
 
 There is no Windows `rtl_tcp` process, host database service, or Docker Desktop dependency. The SQLite engine runs inside the dashboard container, and its database lives in the Docker-managed `fridge-temperature-monitor-data` volume.
 
+Compose restarts `rtl_433` whenever it replaces the dashboard container. This
+refreshes the decoder's private UDP destination so readings continue flowing
+after dashboard upgrades or rebuilds.
+
 The decoder uses the third-party `hertzg/rtl_433:25.12` image. Its [Dockerfiles and publishing workflow are public](https://github.com/hertzg/rtl_433_docker), and the official `rtl_433` project links to those images. The tag corresponds to the upstream 25.12 release; pinning a verified image digest remains a release-hardening task.
 
 ## Configure sensors
