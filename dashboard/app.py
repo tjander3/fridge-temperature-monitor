@@ -417,6 +417,14 @@ class ReadingStore:
                 """
             ).fetchall()
 
+            reading_count_rows = connection.execute(
+                """
+                SELECT sensor_id, COUNT(*) AS reading_count
+                FROM readings
+                GROUP BY sensor_id
+                """
+            ).fetchall()
+
         points_by_sensor = {}
         for row in rows:
             points_by_sensor.setdefault(str(row["sensor_id"]), []).append(
@@ -432,9 +440,18 @@ class ReadingStore:
             }
             for row in setting_rows
         }
+        reading_counts = {
+            str(row["sensor_id"]): row["reading_count"]
+            for row in reading_count_rows
+        }
 
         sensors = []
-        known_ids = set(self.sensors) | set(points_by_sensor) | set(latest_by_sensor) | set(settings_by_sensor)
+        confirmed_unknown_ids = {
+            sensor_id
+            for sensor_id, reading_count in reading_counts.items()
+            if reading_count >= 2
+        }
+        known_ids = set(self.sensors) | set(settings_by_sensor) | confirmed_unknown_ids
         for sensor_id in sorted(known_ids):
             config = dict(self.sensors.get(sensor_id, {}))
             config.update(settings_by_sensor.get(sensor_id, {}))
