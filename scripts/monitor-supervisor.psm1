@@ -21,6 +21,38 @@ function Get-UsbAttachLauncherState {
     return "failed"
 }
 
+function Get-MonitorSupervisorAction {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [bool]$StopRequested,
+
+        [Parameter(Mandatory)]
+        [ValidateSet("running", "handed-off", "failed")]
+        [string]$UsbAttachState,
+
+        [Parameter(Mandatory)]
+        [bool]$LanRelayStarted,
+
+        [Parameter(Mandatory)]
+        [bool]$LanRelayExited
+    )
+
+    if ($StopRequested) {
+        return "stop"
+    }
+    if ($LanRelayStarted -and $LanRelayExited) {
+        return "lan-failed"
+    }
+    if ($UsbAttachState -eq "failed") {
+        return "usb-failed"
+    }
+    if ($UsbAttachState -eq "running" -or ($LanRelayStarted -and -not $LanRelayExited)) {
+        return "wait"
+    }
+    return "complete"
+}
+
 function Get-PreferredLanAddress {
     [CmdletBinding()]
     param()
@@ -64,4 +96,4 @@ function Get-PreferredLanAddress {
         Select-Object -ExpandProperty Address -First 1
 }
 
-Export-ModuleMember -Function Get-UsbAttachLauncherState, Get-PreferredLanAddress
+Export-ModuleMember -Function Get-MonitorSupervisorAction, Get-UsbAttachLauncherState, Get-PreferredLanAddress

@@ -172,24 +172,59 @@ try {
 
     Save-MonitorProcesses
 
-    if (-not $NoWait -and $attachState -eq "running") {
-        Write-Host "Leave this process running. Press Ctrl+C to stop monitoring."
-        while (-not $usbAttach.HasExited) {
+    if (-not $NoWait) {
+        Write-Host "The startup supervisor is running. Press Ctrl+C to stop monitoring."
+        while ($true) {
             Start-Sleep -Seconds 5
-            $usbAttach.Refresh()
+
+            if ($attachState -eq "running") {
+                $usbAttach.Refresh()
+                if ($usbAttach.HasExited) {
+                    $attachState = Get-UsbAttachLauncherState `
+                        -HasExited $true `
+                        -ExitCode $usbAttach.ExitCode
+                    if ($attachState -eq "handed-off") {
+                        $monitorProcesses.Remove("usbipd_attach_pid") | Out-Null
+                        Save-MonitorProcesses
+                        Write-Host "USB auto-attach was handed off successfully to WSL."
+                    }
+                }
+            }
+
+            $lanRelayExited = $false
+            if ($lanProxy) {
+                $lanProxy.Refresh()
+                $lanRelayExited = $lanProxy.HasExited
+            }
+
+            $supervisorAction = Get-MonitorSupervisorAction `
+                -StopRequested (Test-Path -LiteralPath $stopFile) `
+                -UsbAttachState $attachState `
+                -LanRelayStarted ([bool]$lanProxy) `
+                -LanRelayExited $lanRelayExited
+
+            switch ($supervisorAction) {
+                "wait" { continue }
+                "complete" { return }
+                "stop" {
+                    if ($usbAttach -and -not $usbAttach.HasExited) {
+                        Stop-Process -Id $usbAttach.Id -Force
+                    }
+                    if ($lanProxy -and -not $lanProxy.HasExited) {
+                        Stop-Process -Id $lanProxy.Id -Force
+                    }
+                    Remove-Item -LiteralPath $stopFile, $processFile -Force -ErrorAction SilentlyContinue
+                    Write-Host "Cold Storage Monitor stopped normally."
+                    return
+                }
+                "lan-failed" {
+                    throw "The LAN dashboard relay stopped unexpectedly. Check data\lan-proxy.log."
+                }
+                "usb-failed" {
+                    throw "USB auto-attach stopped unexpectedly. Restart this script to resume monitoring."
+                }
+            }
         }
-        if (Test-Path -LiteralPath $stopFile) {
-            Remove-Item -LiteralPath $stopFile, $processFile -Force -ErrorAction SilentlyContinue
-            Write-Host "Cold Storage Monitor stopped normally."
-            return
-        }
-        if ($usbAttach.ExitCode -eq 0) {
-            $monitorProcesses.Remove("usbipd_attach_pid") | Out-Null
-            Save-MonitorProcesses
-            Write-Host "USB auto-attach was handed off successfully to WSL."
-            return
-        }
-        throw "USB auto-attach stopped unexpectedly. Restart this script to resume monitoring."
     }
 }
 catch {
