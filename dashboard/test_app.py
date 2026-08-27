@@ -175,11 +175,21 @@ class ReadingStoreTests(unittest.TestCase):
         sensor = store.dashboard_data(24)["sensors"][0]
         self.assertEqual(sensor["status"], "too_cold")
 
-    def test_unknown_sensor_is_visible_with_a_default_name(self):
-        self.store.add_event(self.event(sensor_id=99999, temperature=45))
+    def test_unknown_sensor_requires_two_readings_before_becoming_visible(self):
+        first_time = app.iso_utc(app.utc_now() - timedelta(minutes=1))
+        self.store.add_event(
+            self.event(sensor_id=99999, temperature=45, observed_at=first_time)
+        )
+        sensor_ids = {
+            sensor["id"] for sensor in self.store.dashboard_data(24)["sensors"]
+        }
+        self.assertNotIn(99999, sensor_ids)
+
+        self.store.add_event(self.event(sensor_id=99999, temperature=46))
         sensor = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 99999)
         self.assertEqual(sensor["name"], "Sensor 99999")
         self.assertEqual(sensor["status"], "ok")
+        self.assertEqual(len(sensor["points"]), 2)
 
     def test_hours_are_clamped(self):
         self.assertEqual(self.store.dashboard_data(0)["hours"], 1)

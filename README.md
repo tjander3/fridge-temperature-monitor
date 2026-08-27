@@ -84,8 +84,10 @@ Edit `dashboard/sensors.local.json` with the IDs reported by `rtl_433` and keep
 `SENSORS_FILE=./dashboard/sensors.local.json` in `.env`. Each entry supports a
 display name, channel, stable chart/card color, monitoring state, minimum and
 maximum temperatures, stale-reading timeout, and an optional note. Unknown
-AcuRite 986 sensors are still stored and displayed with a generated name, which
-helps discover their IDs before adding them to the file.
+AcuRite 986 readings are still stored, but a new sensor ID is displayed with a
+generated name only after two distinct readings. This keeps one-off RF decoding
+errors off the dashboard while still allowing real sensors to be discovered
+before adding them to the file.
 
 Sensor IDs are broadcast over unencrypted 433 MHz radio. They are not
 credentials, but the local file is ignored so a published fork does not reveal
