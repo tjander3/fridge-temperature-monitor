@@ -6,10 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import socket
 import socketserver
 import threading
+from datetime import datetime, timezone
 from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
 
 
@@ -68,6 +71,88 @@ def home_assistant_payload(host: str, port: int, timeout: float) -> bytes:
         ).encode("utf-8")
 
 
+def compact_history_data(dashboard: dict, max_points: int) -> dict:
+    max_points = max(48, min(int(max_points), 2000))
+    all_points = [
+        point
+        for sensor in dashboard.get("sensors", [])
+        for point in sensor.get("points", [])
+    ]
+    timestamps = [
+        datetime.fromisoformat(point["time"].replace("Z", "+00:00")).timestamp()
+        for point in all_points
+    ]
+    first_timestamp = min(timestamps) if timestamps else datetime.now(timezone.utc).timestamp()
+    last_timestamp = max(timestamps) if timestamps else first_timestamp + 60
+    bucket_seconds = max(60, math.ceil(max(60, last_timestamp - first_timestamp) / max_points))
+
+    sensors = []
+    for sensor in dashboard.get("sensors", []):
+        buckets = {}
+        for point in sensor.get("points", []):
+            timestamp = datetime.fromisoformat(point["time"].replace("Z", "+00:00")).timestamp()
+            bucket = int((timestamp - first_timestamp) // bucket_seconds)
+            values = buckets.setdefault(bucket, {"times": [], "temperatures": []})
+            values["times"].append(timestamp)
+            values["temperatures"].append(float(point["temperature_f"]))
+        compact_points = []
+        for bucket in sorted(buckets):
+            values = buckets[bucket]
+            temperatures = values["temperatures"]
+            compact_points.append(
+                {
+                    "time": datetime.fromtimestamp(min(values["times"]), timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    "average_f": round(sum(temperatures) / len(temperatures), 2),
+                    "minimum_f": min(temperatures),
+                    "maximum_f": max(temperatures),
+                    "sample_count": len(temperatures),
+                }
+            )
+        sensors.append(
+            {
+                "id": sensor.get("id"),
+                "name": sensor.get("name"),
+                "color": sensor.get("color"),
+                "points": compact_points,
+            }
+        )
+    return {
+        "generated_at": dashboard.get("generated_at"),
+        "requested_hours": dashboard.get("hours"),
+        "from": datetime.fromtimestamp(first_timestamp, timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+        if timestamps
+        else None,
+        "bucket_minutes": round(bucket_seconds / 60, 2),
+        "sensors": sensors,
+    }
+
+
+def home_assistant_history_payload(
+    host: str, port: int, timeout: float, hours: int, max_points: int
+) -> bytes:
+    native_url = (
+        f"http://{host}:{port}/api/home-assistant/history"
+        f"?hours={hours}&max_points={max_points}"
+    )
+    try:
+        with urlopen(native_url, timeout=timeout) as response:
+            return response.read()
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+        error.close()
+
+    legacy_url = f"http://{host}:{port}/api/readings?hours={hours}"
+    with urlopen(legacy_url, timeout=timeout) as response:
+        return json.dumps(
+            compact_history_data(json.load(response), max_points), separators=(",", ":")
+        ).encode("utf-8")
+
+
 def read_request_head(connection: socket.socket) -> bytes:
     request = bytearray()
     while b"\r\n\r\n" not in request and len(request) < MAX_REQUEST_HEAD:
@@ -108,6 +193,24 @@ class LanProxyHandler(socketserver.BaseRequestHandler):
         assert isinstance(server, LanProxyServer)
         request_head = read_request_head(self.request)
         request_line = request_head.split(b"\r\n", 1)[0]
+        request_target = request_line.split(b" ", 2)[1].decode("ascii", errors="replace")
+        parsed_target = urlsplit(request_target)
+        if parsed_target.path == "/api/home-assistant/history":
+            query = parse_qs(parsed_target.query)
+            try:
+                hours = max(1, min(int(query.get("hours", [str(24 * 365)])[0]), 24 * 365))
+                max_points = max(48, min(int(query.get("max_points", ["1200"])[0]), 2000))
+                body = home_assistant_history_payload(
+                    server.target_host,
+                    server.target_port,
+                    server.connect_timeout,
+                    hours,
+                    max_points,
+                )
+                send_json_response(self.request, body)
+            except (OSError, ValueError) as error:
+                LOGGER.warning("Could not build Home Assistant history: %s", error)
+            return
         if request_line.startswith(b"GET /api/home-assistant "):
             try:
                 body = home_assistant_payload(
