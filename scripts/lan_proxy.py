@@ -4,14 +4,89 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import socket
 import socketserver
 import threading
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 
 LOGGER = logging.getLogger("fridge-monitor-lan-proxy")
 BUFFER_SIZE = 64 * 1024
+MAX_REQUEST_HEAD = 64 * 1024
+
+
+def compact_dashboard_data(dashboard: dict) -> dict:
+    """Adapt the legacy readings response while a container upgrade is pending."""
+    sensors = []
+    for sensor in dashboard.get("sensors", []):
+        latest = sensor.get("latest") or {}
+        sensors.append(
+            {
+                "id": sensor.get("id"),
+                "name": sensor.get("name"),
+                "channel": sensor.get("channel"),
+                "status": sensor.get("status"),
+                "profile": sensor.get("profile"),
+                "monitoring": sensor.get("monitoring", True),
+                "minimum_f": sensor.get("minimum_f"),
+                "maximum_f": sensor.get("maximum_f"),
+                "temperature_f": latest.get("temperature_f"),
+                "observed_at": latest.get("observed_at"),
+                "battery_ok": latest.get("battery_ok"),
+                "rssi": latest.get("rssi"),
+                "snr": latest.get("snr"),
+            }
+        )
+    problem = any(
+        sensor["monitoring"] and sensor["status"] != "ok" for sensor in sensors
+    )
+    return {
+        "generated_at": dashboard.get("generated_at"),
+        "status": "attention" if problem else "ok",
+        "sensors": sensors,
+        "notifier": None,
+    }
+
+
+def home_assistant_payload(host: str, port: int, timeout: float) -> bytes:
+    native_url = f"http://{host}:{port}/api/home-assistant"
+    try:
+        with urlopen(native_url, timeout=timeout) as response:
+            return response.read()
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+        error.close()
+
+    legacy_url = f"http://{host}:{port}/api/readings?hours=1"
+    with urlopen(legacy_url, timeout=timeout) as response:
+        return json.dumps(
+            compact_dashboard_data(json.load(response)), separators=(",", ":")
+        ).encode("utf-8")
+
+
+def read_request_head(connection: socket.socket) -> bytes:
+    request = bytearray()
+    while b"\r\n\r\n" not in request and len(request) < MAX_REQUEST_HEAD:
+        chunk = connection.recv(min(BUFFER_SIZE, MAX_REQUEST_HEAD - len(request)))
+        if not chunk:
+            break
+        request.extend(chunk)
+    return bytes(request)
+
+
+def send_json_response(connection: socket.socket, body: bytes) -> None:
+    headers = (
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "Cache-Control: no-store\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode("ascii")
+    connection.sendall(headers + body)
 
 
 def copy_socket(source: socket.socket, destination: socket.socket) -> None:
@@ -31,6 +106,18 @@ class LanProxyHandler(socketserver.BaseRequestHandler):
     def handle(self) -> None:
         server = self.server
         assert isinstance(server, LanProxyServer)
+        request_head = read_request_head(self.request)
+        request_line = request_head.split(b"\r\n", 1)[0]
+        if request_line.startswith(b"GET /api/home-assistant "):
+            try:
+                body = home_assistant_payload(
+                    server.target_host, server.target_port, server.connect_timeout
+                )
+                send_json_response(self.request, body)
+            except (OSError, ValueError) as error:
+                LOGGER.warning("Could not build Home Assistant status: %s", error)
+            return
+
         try:
             upstream = socket.create_connection(
                 (server.target_host, server.target_port),
@@ -41,6 +128,7 @@ class LanProxyHandler(socketserver.BaseRequestHandler):
             return
 
         with upstream:
+            upstream.sendall(request_head)
             request_to_upstream = threading.Thread(
                 target=copy_socket,
                 args=(self.request, upstream),

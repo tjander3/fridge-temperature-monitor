@@ -483,6 +483,43 @@ class ReadingStore:
             "sensors": sensors,
         }
 
+    def home_assistant_data(self):
+        """Return current, bounded status data for Home Assistant polling."""
+        dashboard = self.dashboard_data(1)
+        sensors = []
+        for sensor in dashboard["sensors"]:
+            latest = sensor.get("latest") or {}
+            sensors.append(
+                {
+                    "id": sensor["id"],
+                    "name": sensor["name"],
+                    "channel": sensor.get("channel"),
+                    "status": sensor["status"],
+                    "profile": sensor["profile"],
+                    "monitoring": sensor["monitoring"],
+                    "minimum_f": sensor.get("minimum_f"),
+                    "maximum_f": sensor.get("maximum_f"),
+                    "temperature_f": latest.get("temperature_f"),
+                    "observed_at": latest.get("observed_at"),
+                    "battery_ok": latest.get("battery_ok"),
+                    "rssi": latest.get("rssi"),
+                    "snr": latest.get("snr"),
+                }
+            )
+
+        runtime = self.notification_settings().get("runtime")
+        sensor_problem = any(
+            sensor["monitoring"] and sensor["status"] != "ok"
+            for sensor in sensors
+        )
+        notifier_problem = runtime is not None and not runtime["healthy"]
+        return {
+            "generated_at": dashboard["generated_at"],
+            "status": "attention" if sensor_problem or notifier_problem else "ok",
+            "sensors": sensors,
+            "notifier": runtime,
+        }
+
     @staticmethod
     def _status(config, latest):
         if not config.get("monitoring", True):
@@ -538,6 +575,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._send_json({"error": "hours must be an integer"}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(self.store.dashboard_data(hours))
+            return
+        if parsed.path == "/api/home-assistant":
+            self._send_json(self.store.home_assistant_data())
             return
         if parsed.path == "/api/admin/notifications":
             if not self._require_admin():

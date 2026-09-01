@@ -197,6 +197,43 @@ PowerShell:
 Remove-NetFirewallRule -DisplayName "Fridge Temperature Monitor (LAN)"
 ```
 
+### Home Assistant integration
+
+Home Assistant is the remote-access layer for this installation. The fridge
+dashboard and its compact `/api/home-assistant` status endpoint remain on the
+home LAN; only Home Assistant is reachable through the existing authenticated
+HTTPS address. The endpoint intentionally omits chart history, recipient
+addresses, credentials, and administrator actions. It returns current
+temperature, range/status, last contact, battery/radio data, and notifier health.
+
+Because the fridge monitor and Home Assistant use separate Docker engines, the
+Windows LAN relay is their local bridge. Install its independent sign-in task so
+Home Assistant can still poll while the USB/WSL startup supervisor is waiting:
+
+```powershell
+.\scripts\install-home-assistant-relay-task.ps1
+Start-ScheduledTask -TaskName "Fridge Monitor Home Assistant Relay"
+```
+
+The Home Assistant host uses:
+
+```text
+http://192.168.0.248:8080/api/home-assistant
+```
+
+If the desktop receives a different DHCP address, update the Home Assistant REST
+resource and restart the relay task. Recovery checks are:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/api/health
+Invoke-RestMethod http://192.168.0.248:8080/api/home-assistant
+```
+
+Do not forward TCP `8080` on the router. The relay is for local communication
+only; remote viewing, history, problem alerts, and manual refresh all belong in
+Home Assistant. The original SMTP notifier remains enabled as an independent
+alert path during and after the migration.
+
 ## Start automatically with Windows
 
 Install the included sign-in Scheduled Task once:
