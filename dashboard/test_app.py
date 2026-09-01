@@ -171,6 +171,22 @@ class ReadingStoreTests(unittest.TestCase):
         self.store.add_event(self.event(sensor_id=10002, temperature=8))
         self.assertEqual(self.store.home_assistant_data()["status"], "attention")
 
+    def test_home_assistant_history_is_bounded_and_preserves_range(self):
+        for index, temperature in enumerate((40, 42, 39, 41)):
+            self.store.add_event(
+                self.event(
+                    sensor_id=10001,
+                    temperature=temperature,
+                    observed_at=app.iso_utc(app.utc_now() - timedelta(minutes=4 - index)),
+                )
+            )
+        data = self.store.home_assistant_history_data(hours=24, max_points=48)
+        mini_fridge = next(sensor for sensor in data["sensors"] if sensor["name"] == "Mini fridge")
+        self.assertLessEqual(len(mini_fridge["points"]), 48)
+        self.assertEqual(min(point["minimum_f"] for point in mini_fridge["points"]), 39)
+        self.assertEqual(max(point["maximum_f"] for point in mini_fridge["points"]), 42)
+        self.assertTrue(all("sample_count" in point for point in mini_fridge["points"]))
+
     def test_reports_low_battery_before_temperature_alert(self):
         event = self.event(temperature=12)
         event["battery_ok"] = 0
@@ -297,6 +313,26 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["sensors"][1]["temperature_f"], -8)
         self.assertNotIn("points", result["sensors"][1])
+
+    def test_home_assistant_history_endpoint_is_bounded(self):
+        app.DashboardHandler.store.add_event(
+            {
+                "time": app.iso_utc(app.utc_now()),
+                "model": "Acurite-986",
+                "id": 10002,
+                "channel": "2F",
+                "battery_ok": 1,
+                "temperature_F": -9,
+            }
+        )
+        with urlopen(
+            f"{self.base_url}/api/home-assistant/history?hours=24&max_points=48",
+            timeout=2,
+        ) as response:
+            result = json.load(response)
+        self.assertEqual(result["requested_hours"], 24)
+        self.assertLessEqual(len(result["sensors"][1]["points"]), 48)
+        self.assertEqual(result["sensors"][1]["points"][-1]["average_f"], -9)
 
     def test_profile_endpoint_rejects_invalid_custom_range(self):
         with self.assertRaises(HTTPError) as context:

@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import secrets
@@ -520,6 +521,74 @@ class ReadingStore:
             "notifier": runtime,
         }
 
+    def home_assistant_history_data(self, hours=24 * 365, max_points=1200):
+        """Return bounded min/average/max buckets for Home Assistant history."""
+        hours = max(1, min(int(hours), 24 * 365))
+        max_points = max(48, min(int(max_points), 2000))
+        now = utc_now()
+        cutoff = iso_utc(now - timedelta(hours=hours))
+        current = self.home_assistant_data()
+
+        with self.lock, self._connection() as connection:
+            earliest_row = connection.execute(
+                "SELECT MIN(observed_at) AS observed_at FROM readings WHERE observed_at >= ?",
+                (cutoff,),
+            ).fetchone()
+            earliest = earliest_row["observed_at"] if earliest_row else None
+            actual_seconds = max(
+                60,
+                int((now - datetime.fromisoformat(earliest.replace("Z", "+00:00"))).total_seconds())
+                if earliest
+                else 60,
+            )
+            bucket_seconds = max(60, math.ceil(actual_seconds / max_points))
+            rows = connection.execute(
+                """
+                SELECT sensor_id,
+                       CAST(strftime('%s', observed_at) / ? AS INTEGER) * ? AS bucket_epoch,
+                       AVG(temperature_f) AS average_f,
+                       MIN(temperature_f) AS minimum_f,
+                       MAX(temperature_f) AS maximum_f,
+                       COUNT(*) AS sample_count
+                FROM readings
+                WHERE observed_at >= ?
+                GROUP BY sensor_id, bucket_epoch
+                ORDER BY bucket_epoch
+                """,
+                (bucket_seconds, bucket_seconds, cutoff),
+            ).fetchall()
+
+        points_by_sensor = {}
+        for row in rows:
+            points_by_sensor.setdefault(row["sensor_id"], []).append(
+                {
+                    "time": iso_utc(datetime.fromtimestamp(row["bucket_epoch"], timezone.utc)),
+                    "average_f": round(row["average_f"], 2),
+                    "minimum_f": row["minimum_f"],
+                    "maximum_f": row["maximum_f"],
+                    "sample_count": row["sample_count"],
+                }
+            )
+
+        sensors = []
+        for sensor in current["sensors"]:
+            points = points_by_sensor.get(sensor["id"], [])
+            sensors.append(
+                {
+                    "id": sensor["id"],
+                    "name": sensor["name"],
+                    "color": self.sensors.get(str(sensor["id"]), {}).get("color"),
+                    "points": points,
+                }
+            )
+        return {
+            "generated_at": iso_utc(now),
+            "requested_hours": hours,
+            "from": earliest,
+            "bucket_minutes": round(bucket_seconds / 60, 2),
+            "sensors": sensors,
+        }
+
     @staticmethod
     def _status(config, latest):
         if not config.get("monitoring", True):
@@ -578,6 +647,19 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/home-assistant":
             self._send_json(self.store.home_assistant_data())
+            return
+        if parsed.path == "/api/home-assistant/history":
+            query = parse_qs(parsed.query)
+            try:
+                hours = int(query.get("hours", [str(24 * 365)])[0])
+                max_points = int(query.get("max_points", ["1200"])[0])
+            except ValueError:
+                self._send_json(
+                    {"error": "hours and max_points must be integers"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self._send_json(self.store.home_assistant_history_data(hours, max_points))
             return
         if parsed.path == "/api/admin/notifications":
             if not self._require_admin():
