@@ -1,3 +1,4 @@
+import json
 import http.server
 import threading
 import unittest
@@ -8,7 +9,30 @@ from lan_proxy import LanProxyServer
 
 class _DashboardHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        body = b'{"status":"ok"}'
+        if self.path == "/api/home-assistant":
+            self.send_error(404)
+            return
+        if self.path == "/api/readings?hours=1":
+            body = json.dumps(
+                {
+                    "generated_at": "2026-09-01T12:00:00Z",
+                    "sensors": [
+                        {
+                            "id": 1,
+                            "name": "Mini fridge",
+                            "status": "ok",
+                            "monitoring": True,
+                            "latest": {
+                                "temperature_f": 41,
+                                "observed_at": "2026-09-01T11:59:00Z",
+                            },
+                            "points": [{"temperature_f": 40}],
+                        }
+                    ],
+                }
+            ).encode()
+        else:
+            body = b'{"status":"ok"}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -39,6 +63,14 @@ class LanProxyTests(unittest.TestCase):
             ) as response:
                 self.assertEqual(response.status, 200)
                 self.assertEqual(response.read(), b'{"status":"ok"}')
+
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{proxy.server_address[1]}/api/home-assistant",
+                timeout=5,
+            ) as response:
+                result = json.load(response)
+                self.assertEqual(result["sensors"][0]["temperature_f"], 41)
+                self.assertNotIn("points", result["sensors"][0])
         finally:
             proxy.shutdown()
             proxy.server_close()

@@ -154,6 +154,23 @@ class ReadingStoreTests(unittest.TestCase):
         self.assertEqual(profiles["beverage"]["maximum_f"], 45)
         self.assertIn("custom", profiles)
 
+    def test_home_assistant_data_is_current_bounded_and_private(self):
+        self.store.add_event(self.event(sensor_id=10001, temperature=41))
+        self.store.add_event(self.event(sensor_id=10002, temperature=-11))
+        data = self.store.home_assistant_data()
+
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(len(data["sensors"]), 2)
+        mini_fridge = next(sensor for sensor in data["sensors"] if sensor["name"] == "Mini fridge")
+        self.assertEqual(mini_fridge["temperature_f"], 41)
+        self.assertEqual(mini_fridge["status"], "setup")
+        self.assertNotIn("points", mini_fridge)
+        self.assertNotIn("email_to", data)
+
+    def test_home_assistant_data_reports_monitored_problem(self):
+        self.store.add_event(self.event(sensor_id=10002, temperature=8))
+        self.assertEqual(self.store.home_assistant_data()["status"], "attention")
+
     def test_reports_low_battery_before_temperature_alert(self):
         event = self.event(temperature=12)
         event["battery_ok"] = 0
@@ -263,6 +280,23 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(result["sensor"]["profile"], "beverage")
         self.assertEqual(result["sensor"]["minimum_f"], 34)
         self.assertEqual(result["sensor"]["maximum_f"], 45)
+
+    def test_home_assistant_endpoint_is_read_only_and_compact(self):
+        app.DashboardHandler.store.add_event(
+            {
+                "time": app.iso_utc(app.utc_now()),
+                "model": "Acurite-986",
+                "id": 10002,
+                "channel": "2F",
+                "battery_ok": 1,
+                "temperature_F": -8,
+            }
+        )
+        with urlopen(f"{self.base_url}/api/home-assistant", timeout=2) as response:
+            result = json.load(response)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["sensors"][1]["temperature_f"], -8)
+        self.assertNotIn("points", result["sensors"][1])
 
     def test_profile_endpoint_rejects_invalid_custom_range(self):
         with self.assertRaises(HTTPError) as context:
