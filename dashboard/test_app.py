@@ -208,18 +208,39 @@ class ReadingStoreTests(unittest.TestCase):
         sensor = store.dashboard_data(24)["sensors"][0]
         self.assertEqual(sensor["status"], "too_cold")
 
-    def test_unknown_sensor_requires_two_readings_before_becoming_visible(self):
+    def test_unknown_sensor_is_rejected_by_default(self):
+        self.assertFalse(self.store.add_event(self.event(sensor_id=99999, temperature=45)))
+        self.assertNotIn(
+            99999,
+            {sensor["id"] for sensor in self.store.dashboard_data(24)["sensors"]},
+        )
+        with closing(sqlite3.connect(self.store.database_path)) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM readings WHERE sensor_id = 99999"
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_unknown_sensor_discovery_can_be_enabled(self):
+        discovery_store = app.ReadingStore(
+            Path(self.temporary_directory.name) / "discovery.db",
+            SENSORS,
+            allow_unknown_sensors=True,
+        )
         first_time = app.iso_utc(app.utc_now() - timedelta(minutes=1))
-        self.store.add_event(
+        discovery_store.add_event(
             self.event(sensor_id=99999, temperature=45, observed_at=first_time)
         )
         sensor_ids = {
-            sensor["id"] for sensor in self.store.dashboard_data(24)["sensors"]
+            sensor["id"] for sensor in discovery_store.dashboard_data(24)["sensors"]
         }
         self.assertNotIn(99999, sensor_ids)
 
-        self.store.add_event(self.event(sensor_id=99999, temperature=46))
-        sensor = next(sensor for sensor in self.store.dashboard_data(24)["sensors"] if sensor["id"] == 99999)
+        discovery_store.add_event(self.event(sensor_id=99999, temperature=46))
+        sensor = next(
+            sensor
+            for sensor in discovery_store.dashboard_data(24)["sensors"]
+            if sensor["id"] == 99999
+        )
         self.assertEqual(sensor["name"], "Sensor 99999")
         self.assertEqual(sensor["status"], "ok")
         self.assertEqual(len(sensor["points"]), 2)

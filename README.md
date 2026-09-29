@@ -87,11 +87,12 @@ Copy-Item dashboard/sensors.example.json dashboard/sensors.local.json
 Edit `dashboard/sensors.local.json` with the IDs reported by `rtl_433` and keep
 `SENSORS_FILE=./dashboard/sensors.local.json` in `.env`. Each entry supports a
 display name, channel, stable chart/card color, monitoring state, minimum and
-maximum temperatures, stale-reading timeout, and an optional note. Unknown
-AcuRite 986 readings are still stored, but a new sensor ID is displayed with a
-generated name only after two distinct readings. This keeps one-off RF decoding
-errors off the dashboard while still allowing real sensors to be discovered
-before adding them to the file.
+maximum temperatures, stale-reading timeout, and an optional note. By default,
+only IDs in this file are stored or displayed. This makes the configuration
+authoritative and prevents corrupted RF decodes from creating false sensors or
+growing the database. Temporarily set `ALLOW_UNKNOWN_SENSORS=true` in `.env`
+only while discovering a new sensor; it appears after two distinct readings.
+Add its ID to `sensors.local.json`, return the setting to `false`, and restart.
 
 Sensor IDs are broadcast over unencrypted 433 MHz radio. They are not
 credentials, but the local file is ignored so a published fork does not reveal
@@ -158,26 +159,17 @@ Windows host. `scripts/start-monitor.ps1` also starts a user-level relay bound
 only to the active Windows LAN address. A narrowly scoped firewall rule is
 needed once for a phone or tablet on the same LAN.
 
-First, run `ipconfig` and note the IPv4 address and interface name for the
-active Wi-Fi connection. Then open **PowerShell as Administrator**, replace
-the two example values below, and run:
+Open **PowerShell as Administrator** in the repository and run the idempotent
+LAN setup script once:
 
 ```powershell
-$lanAddress = "192.168.1.50"
-$interfaceAlias = "Wi-Fi"
-
-New-NetFirewallRule `
-  -DisplayName "Fridge Temperature Monitor (LAN)" `
-  -Description "Allow the dashboard from the local subnet on TCP 8080." `
-  -Direction Inbound `
-  -Action Allow `
-  -Protocol TCP `
-  -LocalPort 8080 `
-  -LocalAddress $lanAddress `
-  -RemoteAddress LocalSubnet `
-  -InterfaceAlias $interfaceAlias `
-  -Profile Any
+.\scripts\setup-lan-access.ps1
 ```
+
+The rule accepts only local-subnet traffic on TCP port `8080`. It is not pinned
+to one local IP or adapter, so it continues working when DHCP changes the
+desktop address or the desktop switches between Ethernet and Wi-Fi. The relay
+itself still listens only on the active LAN address selected at startup.
 
 With the monitor running, the startup script prints the same-Wi-Fi URL. Open
 that URL on a device connected to the same Wi-Fi. The desktop must remain
@@ -188,10 +180,8 @@ The dashboard has no application login. Do not forward port `8080` on the
 router or expose it directly to the internet. For future remote access, use an
 authenticated private network such as Tailscale instead.
 
-The relay detects the active address whenever the monitor starts. If DHCP gives
-the desktop a different address, recreate the firewall rule with that new
-address. To remove LAN access completely, run this command from Administrator
-PowerShell:
+The relay detects the active address whenever the monitor starts. To remove LAN
+access completely, run this command from Administrator PowerShell:
 
 ```powershell
 Remove-NetFirewallRule -DisplayName "Fridge Temperature Monitor (LAN)"
@@ -218,7 +208,7 @@ Start-ScheduledTask -TaskName "Fridge Monitor Home Assistant Relay"
 The Home Assistant host uses:
 
 ```text
-http://192.168.0.248:8080/api/home-assistant
+http://<desktop-ip>:8080/api/home-assistant
 ```
 
 If the desktop receives a different DHCP address, update the Home Assistant REST
@@ -226,7 +216,7 @@ resource and restart the relay task. Recovery checks are:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8080/api/health
-Invoke-RestMethod http://192.168.0.248:8080/api/home-assistant
+Invoke-RestMethod http://<desktop-ip>:8080/api/home-assistant
 ```
 
 Do not forward TCP `8080` on the router. The relay is for local communication
