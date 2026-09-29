@@ -21,6 +21,12 @@ SENSORS_PATH = Path(os.environ.get("SENSORS_PATH", APP_DIR / "sensors.json"))
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
 SYSLOG_PORT = int(os.environ.get("SYSLOG_PORT", "1514"))
 ADMIN_API_TOKEN = os.environ.get("ADMIN_API_TOKEN", "").strip()
+ALLOW_UNKNOWN_SENSORS = os.environ.get("ALLOW_UNKNOWN_SENSORS", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 DEFAULT_STALE_MINUTES = 120
 
 STORAGE_PROFILES = {
@@ -92,10 +98,16 @@ def load_sensors(path=SENSORS_PATH):
 
 
 class ReadingStore:
-    def __init__(self, database_path=DATABASE_PATH, sensors=None):
+    def __init__(
+        self,
+        database_path=DATABASE_PATH,
+        sensors=None,
+        allow_unknown_sensors=False,
+    ):
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.sensors = sensors if sensors is not None else load_sensors()
+        self.allow_unknown_sensors = allow_unknown_sensors
         self.lock = threading.Lock()
         self._initialize()
 
@@ -203,6 +215,9 @@ class ReadingStore:
         except (KeyError, TypeError, ValueError):
             return False
 
+        if not self.allow_unknown_sensors and str(sensor_id) not in self.sensors:
+            return False
+
         with self.lock, self._connection() as connection:
             cursor = connection.execute(
                 """
@@ -249,9 +264,11 @@ class ReadingStore:
             maximum_f = profile_config["maximum_f"]
 
         with self.lock, self._connection() as connection:
-            known_sensor = str(sensor_id) in self.sensors or connection.execute(
-                "SELECT 1 FROM readings WHERE sensor_id = ? LIMIT 1", (sensor_id,)
-            ).fetchone()
+            known_sensor = str(sensor_id) in self.sensors
+            if self.allow_unknown_sensors and not known_sensor:
+                known_sensor = connection.execute(
+                    "SELECT 1 FROM readings WHERE sensor_id = ? LIMIT 1", (sensor_id,)
+                ).fetchone()
             if not known_sensor:
                 raise KeyError(sensor_id)
 
@@ -452,7 +469,9 @@ class ReadingStore:
             for sensor_id, reading_count in reading_counts.items()
             if reading_count >= 2
         }
-        known_ids = set(self.sensors) | set(settings_by_sensor) | confirmed_unknown_ids
+        known_ids = set(self.sensors)
+        if self.allow_unknown_sensors:
+            known_ids |= set(settings_by_sensor) | confirmed_unknown_ids
         for sensor_id in sorted(known_ids):
             config = dict(self.sensors.get(sensor_id, {}))
             config.update(settings_by_sensor.get(sensor_id, {}))
@@ -769,7 +788,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 def serve():
     sensors = load_sensors()
-    store = ReadingStore(sensors=sensors)
+    store = ReadingStore(
+        sensors=sensors,
+        allow_unknown_sensors=ALLOW_UNKNOWN_SENSORS,
+    )
     DashboardHandler.store = store
 
     udp_server = socketserver.ThreadingUDPServer(("0.0.0.0", SYSLOG_PORT), SyslogHandler)

@@ -10,6 +10,7 @@ services:
       - ${SENSORS_FILE:-./dashboard/sensors.example.json}:/app/sensors.json:ro
     environment:
       ADMIN_API_TOKEN: "${ADMIN_API_TOKEN:-}"
+      ALLOW_UNKNOWN_SENSORS: "${ALLOW_UNKNOWN_SENSORS:-false}"
     restart: unless-stopped
     healthcheck:
       test:
